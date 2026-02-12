@@ -541,7 +541,9 @@ class TelegramBot:
         # Process as normal text message
         await self._cancel_processing(chat_id)
 
-        proc_task = asyncio.create_task(self._process_message(chat_id, text, update))
+        proc_task = asyncio.create_task(
+            self._process_message(chat_id, text, update, status_note=f"\U0001f399 {text}")
+        )
         self._processing[chat_id] = proc_task
         proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
 
@@ -562,6 +564,7 @@ class TelegramBot:
         text: str,
         update: Update,
         images: list[ImageInput] | None = None,
+        status_note: str | None = None,
     ):
         """Run agent and send response. Cancellable by new messages."""
         # Start typing
@@ -574,6 +577,8 @@ class TelegramBot:
         # Send initial status message that we'll edit in-place
         status_msg = await self._app.bot.send_message(chat_id, "\u23f3 Thinking...")
         status = _StatusTracker(self._app, chat_id, status_msg.message_id)
+        if status_note:
+            status._steps.insert(0, status_note)
 
         try:
             response = await self.agent.process(
