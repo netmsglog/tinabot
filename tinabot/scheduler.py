@@ -16,7 +16,7 @@ from loguru import logger
 
 @dataclass
 class Schedule:
-    """A single recurring schedule."""
+    """A single schedule (recurring or one-time)."""
 
     id: str
     name: str
@@ -24,6 +24,7 @@ class Schedule:
     prompt: str
     chat_id: int
     enabled: bool = True
+    once: bool = False  # If True, auto-delete after first execution
     created_at: str = ""
     last_run: str | None = None
 
@@ -190,5 +191,10 @@ class Scheduler:
             except Exception:
                 pass
 
-        # Update last_run regardless (avoid retrying every 30s on failure)
-        self.store.update_last_run(schedule.id, now)
+        # One-time schedule: remove after execution
+        if schedule.once:
+            self.store.remove(schedule.id)
+            logger.info(f"One-time schedule '{schedule.id}' removed after execution")
+        else:
+            # Update last_run (avoid retrying every 30s on failure)
+            self.store.update_last_run(schedule.id, now)

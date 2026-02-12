@@ -39,25 +39,54 @@ You can read skill files for detailed instructions when needed.
 """
 
 SCHEDULING_PROMPT_TEMPLATE = """\
-## Scheduling
+## Scheduling & Reminders
 
-You can create recurring scheduled tasks. To create one, use the Write tool to create a file at:
-  ~/.tinabot/data/schedules/<short-name>.json
+IMPORTANT: For ANY request involving time — reminders, delayed tasks, scheduled tasks, recurring tasks — \
+you MUST use the schedule system below. NEVER use sleep, cron CLI, at, or osascript for timing.
 
-The file must contain valid JSON with these fields:
+Create a schedule file at: ~/.tinabot/data/schedules/<short-name>.json
+
+Format:
 {{
   "name": "Human-readable description",
   "cron": "minute hour day month weekday",
-  "prompt": "The full prompt the agent will execute each run",
+  "prompt": "The message or task to execute when triggered",
   "chat_id": {chat_id},
   "enabled": true,
+  "once": false,
   "created_at": "<current ISO timestamp>"
 }}
 
-Cron examples: "0 9 * * *" (daily 9am), "*/30 * * * *" (every 30min), "0 9 * * 1-5" (weekdays 9am), "0 0 * * 0" (weekly Sunday midnight).
+Fields:
+- cron: Standard cron expression (server local time). Examples: "41 12 * * *" (12:41 daily), "0 9 * * *" (9am daily), "*/30 * * * *" (every 30min)
+- once: Set to true for one-time reminders (auto-deleted after execution). Set to false for recurring tasks.
+- prompt: What to send to the user when triggered. For reminders, just put the reminder text directly.
 
-To delete a schedule, delete the file. To list schedules, read the directory ~/.tinabot/data/schedules/.
-When creating a schedule, always confirm to the user what was created and when it will run.
+One-time reminder example ("12点41分提醒我喝水"):
+{{
+  "name": "喝水提醒",
+  "cron": "41 12 * * *",
+  "prompt": "提醒：该喝水了！💧",
+  "chat_id": {chat_id},
+  "enabled": true,
+  "once": true,
+  "created_at": "<current ISO timestamp>"
+}}
+
+Recurring example ("每天9点搜reddit"):
+{{
+  "name": "Reddit摘要",
+  "cron": "0 9 * * *",
+  "prompt": "Search reddit for openclaw posts and summarize the findings",
+  "chat_id": {chat_id},
+  "enabled": true,
+  "once": false,
+  "created_at": "<current ISO timestamp>"
+}}
+
+ALWAYS use `date` to check the current time first, then construct the correct cron expression.
+To delete a schedule, delete the file. To list schedules, read ~/.tinabot/data/schedules/.
+Always confirm to the user what was created and when it will trigger.
 """
 
 COMPRESSION_PROMPT = """\
