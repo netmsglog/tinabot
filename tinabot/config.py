@@ -30,6 +30,7 @@ class TelegramConfig(BaseModel):
     enabled: bool = False
     token: str = ""
     allowed_users: list[int] = Field(default_factory=list)
+    groq_api_key: str = ""  # For voice transcription (Whisper via Groq)
 
 
 class MemoryConfig(BaseModel):

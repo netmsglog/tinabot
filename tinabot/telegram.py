@@ -16,6 +16,8 @@ from telegram.ext import (
     filters,
 )
 
+from groq import AsyncGroq
+
 from tinabot.agent import ImageInput, TinaAgent
 from tinabot.config import TelegramConfig
 from tinabot.memory import TaskMemory
@@ -145,6 +147,10 @@ class TelegramBot:
         self._typing_tasks: dict[int, asyncio.Task] = {}
         self._processing: dict[int, asyncio.Task] = {}  # chat_id -> agent task
         self._shutdown_event: asyncio.Event | None = None
+        # Groq client for voice transcription
+        self._groq: AsyncGroq | None = None
+        if config.groq_api_key:
+            self._groq = AsyncGroq(api_key=config.groq_api_key)
 
     def _is_allowed(self, user_id: int) -> bool:
         """Check if user is in allowlist. Empty list = deny all."""
@@ -205,6 +211,9 @@ class TelegramBot:
         )
         self._app.add_handler(
             MessageHandler(filters.PHOTO, self._on_photo)
+        )
+        self._app.add_handler(
+            MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice)
         )
 
         logger.info("Starting Telegram bot (polling)...")
@@ -479,6 +488,60 @@ class TelegramBot:
         proc_task = asyncio.create_task(
             self._process_message(chat_id, text, update, images=[image])
         )
+        self._processing[chat_id] = proc_task
+        proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
+
+    async def _on_voice(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle voice/audio messages: transcribe with Groq Whisper, then send text to agent."""
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        if not self._groq:
+            await update.message.reply_text(
+                "Voice not configured. Set telegram.groq_api_key or "
+                "TINABOT_TELEGRAM__GROQ_API_KEY."
+            )
+            return
+
+        chat_id = update.message.chat_id
+
+        # Get file from voice or audio message
+        voice = update.message.voice or update.message.audio
+        if not voice:
+            return
+
+        try:
+            file = await ctx.bot.get_file(voice.file_id)
+            data = await file.download_as_bytearray()
+        except Exception as e:
+            logger.error(f"Failed to download voice: {e}")
+            await update.message.reply_text(f"Failed to download voice: {e}")
+            return
+
+        # Transcribe with Groq Whisper
+        try:
+            transcription = await self._groq.audio.transcriptions.create(
+                file=("voice.ogg", bytes(data), "audio/ogg"),
+                model="whisper-large-v3-turbo",
+                response_format="text",
+            )
+            text = transcription.strip() if isinstance(transcription, str) else transcription.text.strip()
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            await update.message.reply_text(f"Transcription failed: {e}")
+            return
+
+        if not text:
+            await update.message.reply_text("(empty transcription)")
+            return
+
+        # Show the transcribed text to the user
+        await update.message.reply_text(f"\U0001f399 {text}")
+
+        # Process as normal text message
+        await self._cancel_processing(chat_id)
+
+        proc_task = asyncio.create_task(self._process_message(chat_id, text, update))
         self._processing[chat_id] = proc_task
         proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
 
