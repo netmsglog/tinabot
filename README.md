@@ -11,6 +11,8 @@ A local AI agent powered by [Claude Agent SDK](https://github.com/anthropics/cla
 - **Auto-Compression** — When a task exceeds a configurable turn count, the conversation is summarized and a fresh session starts with the summary injected, bounding token costs
 - **Skills System** — Loads skill definitions from `~/.agents/skills/*/SKILL.md`. Small skills are inlined in the system prompt; large ones use progressive loading (agent reads the full file when needed)
 - **Scheduled Tasks** — Create recurring tasks from natural language (e.g. "每天9点搜reddit发给我"). Cron-based scheduler runs in background, executes the agent, and delivers results to Telegram
+- **Voice Messages** — Send voice messages in Telegram; automatically transcribed to text via Groq Whisper API, then processed by the agent
+- **Photo Messages** — Send photos with instructions; images are saved locally and sent to the agent with both visual content and file path, so the agent can see and manipulate the file
 - **Full Tool Access** — Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, Task — the same tools available in Claude Code
 
 ## Quick Start
@@ -101,6 +103,35 @@ Cron examples: `0 9 * * *` (daily 9am), `*/30 * * * *` (every 30min), `0 9 * * 1
 
 Schedules are stored as JSON files in `~/.tinabot/data/schedules/` and persist across restarts. Use `/schedules` in Telegram to list schedules for the current chat.
 
+### Voice Messages
+
+Send a voice message in Telegram and Tina will automatically transcribe it using the Groq Whisper API, then process the text. Requires a Groq API key (free tier is sufficient).
+
+```bash
+# Configure via environment variable
+TINABOT_TELEGRAM__GROQ_API_KEY=gsk_xxx tina serve
+
+# Or in config.json
+{ "telegram": { "groq_api_key": "gsk_xxx" } }
+```
+
+Flow:
+1. Send a voice message
+2. Bot immediately shows "Transcribing voice..."
+3. Transcription replaces the hint: `🎙 your transcribed text`
+4. Agent processes the text and replies
+
+The transcribed text is also shown in the live status message while the agent works.
+
+### Photo Messages
+
+Send a photo (with or without a caption) and Tina will process it with the agent. Photos are saved to `~/.tinabot/data/images/` so the agent can reference the file on disk.
+
+Flow:
+1. Send a photo with caption "Save this to Apple Notes as hat" → Bot confirms: "📷 Image saved / Request: Save this to... / Reply OK to confirm"
+2. Send a photo without caption → Bot asks: "📷 Image saved / What would you like to do with this image?"
+3. Reply with OK (or new instructions) → Agent receives both the visual content and the local file path
+
 ### User Management
 
 The Telegram bot requires an explicit allowlist — an empty list denies all users. When a denied user messages the bot, they see their user ID with instructions:
@@ -153,7 +184,8 @@ Config is loaded from `~/.tinabot/config.json` and can be overridden with `TINAB
   "telegram": {
     "enabled": false,
     "token": "",
-    "allowed_users": []
+    "allowed_users": [],
+    "groq_api_key": ""
   },
   "memory": {
     "data_dir": "~/.tinabot/data",
@@ -207,6 +239,8 @@ Instructions for the agent...
 - **自动压缩** — 任务超过设定轮次后，自动总结对话并开启新 session（摘要注入 system prompt），控制 token 开销
 - **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载技能定义。小技能内联到 system prompt，大技能按需加载
 - **定时任务** — 用自然语言创建定时任务（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并将结果发送到 Telegram
+- **语音消息** — 在 Telegram 发送语音，通过 Groq Whisper API 自动转写为文字后交给 Agent 处理
+- **图片消息** — 发送图片附带指令，图片保存到本地并以多模态内容+文件路径发送给 Agent，Agent 既能看到图片也能操作文件
 - **完整工具集** — Read、Write、Edit、Bash、Glob、Grep、WebSearch、WebFetch、Task — 与 Claude Code 相同的工具
 
 ## 快速开始
@@ -296,6 +330,35 @@ tina schedule del reddit-digest
 Cron 示例：`0 9 * * *`（每天9点）、`*/30 * * * *`（每30分钟）、`0 9 * * 1-5`（工作日9点）。
 
 定时任务以 JSON 文件存储在 `~/.tinabot/data/schedules/`，重启后自动恢复。在 Telegram 中使用 `/schedules` 查看当前聊天的定时任务。
+
+### 语音消息
+
+在 Telegram 中发送语音消息，Tina 会通过 Groq Whisper API 自动转写为文字，然后交给 Agent 处理。需要 Groq API key（免费额度足够日常使用）。
+
+```bash
+# 环境变量配置
+TINABOT_TELEGRAM__GROQ_API_KEY=gsk_xxx tina serve
+
+# 或写入 config.json
+{ "telegram": { "groq_api_key": "gsk_xxx" } }
+```
+
+流程：
+1. 发送语音消息
+2. 立即显示 `🎤 Transcribing voice...`
+3. 转写完成后更新为 `🎙 转写的文字内容`
+4. Agent 处理文字并回复
+
+处理过程中，状态消息也会显示转写内容，方便确认识别是否正确。
+
+### 图片消息
+
+发送图片（可附带说明），Tina 会保存图片到 `~/.tinabot/data/images/` 并交给 Agent 处理。Agent 同时收到图片内容和本地文件路径，既能看到图片也能操作文件。
+
+流程：
+1. 发送带说明的图片（如"把这张图存到 Apple Notes"）→ 确认提示：`📷 Image saved / Request: ... / Reply OK to confirm`
+2. 发送不带说明的图片 → 询问：`📷 Image saved / What would you like to do with this image?`
+3. 回复 OK（或输入新指令）→ Agent 开始处理
 
 ### 用户管理
 
