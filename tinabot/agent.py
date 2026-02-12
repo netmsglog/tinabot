@@ -121,13 +121,16 @@ class TinaAgent:
         if self.config.api_key:
             env["ANTHROPIC_API_KEY"] = self.config.api_key
 
+        cwd = Path(self.config.cwd).expanduser()
+        cwd.mkdir(parents=True, exist_ok=True)
+
         return ClaudeAgentOptions(
             model=self.config.model,
             max_thinking_tokens=self.config.max_thinking_tokens,
             system_prompt=system_prompt,
             allowed_tools=all_tools,
             permission_mode=self.config.permission_mode,
-            cwd=str(Path(self.config.cwd).expanduser()),
+            cwd=str(cwd),
             resume=resume,
             env=env,
         )

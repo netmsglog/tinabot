@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 
 import typer
 from loguru import logger
@@ -80,7 +81,7 @@ def _print_task_info(task: Task):
 
 async def _run_repl(tina: TinaApp):
     """Run the interactive REPL loop."""
-    history_path = tina.config.memory.data_dir.replace("data", "history")
+    history_path = str(Path(tina.config.memory.data_dir).expanduser().parent / "history")
     session: PromptSession = PromptSession(
         history=FileHistory(history_path),
     )
@@ -272,6 +273,59 @@ def skills():
     else:
         for s in skill_list:
             console.print(f"  {s['name']}: {s['description']}", style="cyan")
+
+
+user_cli = typer.Typer(help="Manage Telegram allowed users")
+app_cli.add_typer(user_cli, name="user")
+
+
+@user_cli.command("add")
+def user_add(user_id: int = typer.Argument(..., help="Telegram user ID to allow")):
+    """Add a user to the Telegram allowlist."""
+    from tinabot.config import Config
+
+    data = Config.load_raw()
+    tg = data.setdefault("telegram", {})
+    users = tg.setdefault("allowed_users", [])
+    if user_id in users:
+        console.print(f"User {user_id} already in allowlist", style="yellow")
+    else:
+        users.append(user_id)
+        Config.save_raw(data)
+        console.print(f"Added user {user_id}", style="green")
+    console.print(f"Allowed users: {users}", style="dim")
+
+
+@user_cli.command("del")
+def user_del(user_id: int = typer.Argument(..., help="Telegram user ID to remove")):
+    """Remove a user from the Telegram allowlist."""
+    from tinabot.config import Config
+
+    data = Config.load_raw()
+    users = data.get("telegram", {}).get("allowed_users", [])
+    if user_id not in users:
+        console.print(f"User {user_id} not in allowlist", style="yellow")
+    else:
+        users.remove(user_id)
+        data["telegram"]["allowed_users"] = users
+        Config.save_raw(data)
+        console.print(f"Removed user {user_id}", style="green")
+    console.print(f"Allowed users: {users}", style="dim")
+
+
+@user_cli.command("list")
+def user_list():
+    """Show the Telegram allowlist."""
+    from tinabot.config import Config
+
+    data = Config.load_raw()
+    users = data.get("telegram", {}).get("allowed_users", [])
+    if not users:
+        console.print("Allowlist is empty (all users permitted)", style="dim")
+    else:
+        console.print(f"Allowed users ({len(users)}):", style="bold")
+        for uid in users:
+            console.print(f"  {uid}")
 
 
 def main():

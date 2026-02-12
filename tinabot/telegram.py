@@ -141,10 +141,25 @@ class TelegramBot:
         self._shutdown_event: asyncio.Event | None = None
 
     def _is_allowed(self, user_id: int) -> bool:
-        """Check if user is in allowlist. Empty list = allow all."""
-        if not self.config.allowed_users:
-            return True
+        """Check if user is in allowlist. Empty list = deny all."""
         return user_id in self.config.allowed_users
+
+    async def _check_allowed(self, update: Update) -> bool:
+        """Check permission and reply with user ID if denied."""
+        if not update.effective_user:
+            return False
+        user = update.effective_user
+        if self._is_allowed(user.id):
+            return True
+        logger.info(f"Denied user {user.id} (@{user.username})")
+        await update.message.reply_text(
+            f"You are not authorized.\n"
+            f"Your user ID: <code>{user.id}</code>\n\n"
+            f"Ask the admin to run:\n"
+            f"<code>tina user add {user.id}</code>",
+            parse_mode="HTML",
+        )
+        return False
 
     def _get_or_create_task(self, chat_id: int, message: str = "") -> str:
         """Get or create the active task for a chat."""
@@ -267,22 +282,17 @@ class TelegramBot:
     # --- Command handlers ---
 
     async def _on_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.effective_user:
-            return
-        user = update.effective_user
-        if not self._is_allowed(user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
         await update.message.reply_text(
-            f"Hi {user.first_name}! I'm Tina.\n\n"
+            f"Hi {update.effective_user.first_name}! I'm Tina.\n\n"
             "Send me a message and I'll help you out.\n"
             "Type /help for commands."
         )
 
     async def _on_new(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.effective_user:
-            return
-        if not self._is_allowed(update.effective_user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
         chat_id = update.message.chat_id
@@ -292,9 +302,7 @@ class TelegramBot:
         await update.message.reply_text(f"Created task [{task.id}] {task.name}")
 
     async def _on_tasks(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.effective_user:
-            return
-        if not self._is_allowed(update.effective_user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
         tasks = self.memory.list_tasks()
@@ -314,9 +322,7 @@ class TelegramBot:
         await update.message.reply_text("\n".join(lines))
 
     async def _on_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.effective_user:
-            return
-        if not self._is_allowed(update.effective_user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
         chat_id = update.message.chat_id
@@ -334,9 +340,7 @@ class TelegramBot:
         await update.message.reply_text(f"Resumed [{task.id}] {task.name}")
 
     async def _on_compress(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.effective_user:
-            return
-        if not self._is_allowed(update.effective_user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
         chat_id = update.message.chat_id
@@ -358,12 +362,9 @@ class TelegramBot:
             await update.message.reply_text("Compression failed")
 
     async def _on_skills(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.effective_user:
-            return
-        if not self._is_allowed(update.effective_user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
-        from tinabot.skills import SkillsLoader
         skills = self.agent.skills.list_skills()
         if not skills:
             await update.message.reply_text("No skills loaded.")
@@ -389,9 +390,7 @@ class TelegramBot:
 
     async def _on_message(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle incoming text messages with live status updates."""
-        if not update.message or not update.effective_user:
-            return
-        if not self._is_allowed(update.effective_user.id):
+        if not update.message or not await self._check_allowed(update):
             return
 
         chat_id = update.message.chat_id

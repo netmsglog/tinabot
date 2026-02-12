@@ -16,7 +16,7 @@ class AgentConfig(BaseModel):
     model: str = "claude-opus-4-6"
     max_thinking_tokens: int = 10000
     permission_mode: str = "acceptEdits"
-    cwd: str = str(Path.home())
+    cwd: str = str(Path.home() / ".tinabot" / "workspace")
     api_key: str = ""  # ANTHROPIC_API_KEY, optional (falls back to claude login)
     allowed_tools: list[str] = Field(default_factory=lambda: [
         "Read", "Write", "Edit", "Bash", "Glob", "Grep",
@@ -66,9 +66,31 @@ class Config(BaseSettings):
     @classmethod
     def load(cls) -> Config:
         """Load config from file and environment."""
-        config_path = Path.home() / ".tinabot" / "config.json"
+        config_path = Config.config_path()
         file_data: dict[str, Any] = {}
         if config_path.exists():
             with open(config_path) as f:
                 file_data = json.load(f)
         return cls(**file_data)
+
+    @staticmethod
+    def config_path() -> Path:
+        return Path.home() / ".tinabot" / "config.json"
+
+    @staticmethod
+    def load_raw() -> dict[str, Any]:
+        """Load raw JSON dict from config file."""
+        path = Config.config_path()
+        if path.exists():
+            with open(path) as f:
+                return json.load(f)
+        return {}
+
+    @staticmethod
+    def save_raw(data: dict[str, Any]):
+        """Write raw JSON dict to config file."""
+        path = Config.config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
