@@ -510,12 +510,15 @@ class TelegramBot:
         if not voice:
             return
 
+        # Immediate feedback while downloading + transcribing
+        hint_msg = await update.message.reply_text("\U0001f3a4 Transcribing voice...")
+
         try:
             file = await ctx.bot.get_file(voice.file_id)
             data = await file.download_as_bytearray()
         except Exception as e:
             logger.error(f"Failed to download voice: {e}")
-            await update.message.reply_text(f"Failed to download voice: {e}")
+            await hint_msg.edit_text(f"Failed to download voice: {e}")
             return
 
         # Transcribe with Groq Whisper
@@ -528,15 +531,15 @@ class TelegramBot:
             text = transcription.strip() if isinstance(transcription, str) else transcription.text.strip()
         except Exception as e:
             logger.error(f"Transcription failed: {e}")
-            await update.message.reply_text(f"Transcription failed: {e}")
+            await hint_msg.edit_text(f"Transcription failed: {e}")
             return
 
         if not text:
-            await update.message.reply_text("(empty transcription)")
+            await hint_msg.edit_text("(empty transcription)")
             return
 
-        # Show the transcribed text to the user
-        await update.message.reply_text(f"\U0001f399 {text}")
+        # Replace hint with the transcribed text
+        await hint_msg.edit_text(f"\U0001f399 {text}")
 
         # Process as normal text message
         await self._cancel_processing(chat_id)
