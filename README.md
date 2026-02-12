@@ -39,6 +39,9 @@ tina chat         # Same as above
 tina serve        # Start Telegram bot
 tina tasks        # List all tasks
 tina skills       # List loaded skills
+tina user list    # Show Telegram allowlist
+tina user add ID  # Add a user to the allowlist
+tina user del ID  # Remove a user from the allowlist
 ```
 
 REPL commands:
@@ -74,16 +77,41 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 
 Each Telegram chat gets its own isolated task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/skills`, `/help`.
 
-**Live progress:** While the agent works, a status message updates in real-time showing thinking and tool calls:
+### User Management
+
+The Telegram bot requires an explicit allowlist — an empty list denies all users. When a denied user messages the bot, they see their user ID with instructions:
 
 ```
+You are not authorized.
+Your user ID: 123456789
+
+Ask the admin to run:
+tina user add 123456789
+```
+
+Manage the allowlist from CLI:
+
+```bash
+tina user add 123456789   # Allow a user
+tina user del 123456789   # Revoke access
+tina user list            # Show current allowlist
+```
+
+Changes are written to `~/.tinabot/config.json`. Restart `tina serve` to apply.
+
+### Live Progress
+
+While the agent works, a status message updates in real-time showing elapsed time, thinking state, and tool calls:
+
+```
+⏳ 15s
 🧠 Thinking...
 💻 `git status`
 📖 Read `config.py`
 ✏️ Edit `main.py`
 ```
 
-The status message is deleted and replaced by the final response when done.
+The status message is deleted and replaced by the final response when done. If a task takes too long, simply send a new message to interrupt and start a new request immediately.
 
 ## Configuration
 
@@ -95,7 +123,7 @@ Config is loaded from `~/.tinabot/config.json` and can be overridden with `TINAB
     "model": "claude-opus-4-6",
     "max_thinking_tokens": 10000,
     "permission_mode": "acceptEdits",
-    "cwd": "~",
+    "cwd": "~/.tinabot/workspace",
     "api_key": ""
   },
   "telegram": {
@@ -183,6 +211,9 @@ tina chat         # 同上
 tina serve        # 启动 Telegram 机器人
 tina tasks        # 列出所有任务
 tina skills       # 列出已加载的技能
+tina user list    # 查看 Telegram 白名单
+tina user add ID  # 添加用户到白名单
+tina user del ID  # 从白名单移除用户
 ```
 
 REPL 命令：
@@ -218,16 +249,41 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 
 每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/skills`、`/help`。
 
-**实时进度：** Agent 工作时，状态消息实时显示思考和工具调用过程：
+### 用户管理
+
+Telegram 机器人需要显式白名单 — 空列表拒绝所有用户。被拒用户发消息时会看到自己的 ID 和添加指引：
 
 ```
+You are not authorized.
+Your user ID: 123456789
+
+Ask the admin to run:
+tina user add 123456789
+```
+
+通过 CLI 管理白名单：
+
+```bash
+tina user add 123456789   # 允许用户
+tina user del 123456789   # 移除用户
+tina user list            # 查看白名单
+```
+
+修改后重启 `tina serve` 生效。
+
+### 实时进度
+
+Agent 工作时，状态消息实时显示经过时间、思考状态和工具调用：
+
+```
+⏳ 15s
 🧠 Thinking...
 💻 `git status`
 📖 Read `config.py`
 ✏️ Edit `main.py`
 ```
 
-完成后状态消息被删除，替换为最终回复。
+完成后状态消息被删除，替换为最终回复。任务执行时间过长时，直接发送新消息即可中断当前任务，立即处理新请求。
 
 ## 配置
 
