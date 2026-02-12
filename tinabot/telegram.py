@@ -138,6 +138,7 @@ class TelegramBot:
         self._app: Application | None = None
         self._chat_tasks: dict[int, str] = {}  # chat_id -> task_id
         self._typing_tasks: dict[int, asyncio.Task] = {}
+        self._processing: dict[int, asyncio.Task] = {}  # chat_id -> agent task
         self._shutdown_event: asyncio.Event | None = None
 
     def _is_allowed(self, user_id: int) -> bool:
@@ -222,6 +223,12 @@ class TelegramBot:
         """Stop the bot."""
         if self._shutdown_event:
             self._shutdown_event.set()
+
+        # Cancel all in-flight agent processing
+        for proc in self._processing.values():
+            if not proc.done():
+                proc.cancel()
+        self._processing.clear()
 
         for task in self._typing_tasks.values():
             if not task.done():
@@ -398,6 +405,29 @@ class TelegramBot:
         if not text.strip():
             return
 
+        # Interrupt any in-flight agent call for this chat
+        await self._cancel_processing(chat_id)
+
+        # Wrap the actual work in a trackable task
+        proc_task = asyncio.create_task(self._process_message(chat_id, text, update))
+        self._processing[chat_id] = proc_task
+
+        # Clean up reference when done (don't await - let it run)
+        proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
+
+    async def _cancel_processing(self, chat_id: int):
+        """Cancel in-flight agent processing for a chat."""
+        proc = self._processing.pop(chat_id, None)
+        if proc and not proc.done():
+            proc.cancel()
+            # Wait briefly for cleanup to finish
+            try:
+                await asyncio.wait_for(asyncio.shield(proc), timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+
+    async def _process_message(self, chat_id: int, text: str, update: Update):
+        """Run agent and send response. Cancellable by new messages."""
         # Start typing
         self._start_typing(chat_id)
 
@@ -406,7 +436,7 @@ class TelegramBot:
         task = self.memory.get_task(task_id)
 
         # Send initial status message that we'll edit in-place
-        status_msg = await update.message.reply_text("\u23f3 Thinking...")
+        status_msg = await self._app.bot.send_message(chat_id, "\u23f3 Thinking...")
         status = _StatusTracker(self._app, chat_id, status_msg.message_id)
 
         try:
@@ -427,11 +457,18 @@ class TelegramBot:
 
             await self._send(chat_id, reply)
 
+        except asyncio.CancelledError:
+            # Interrupted by a new message from the user
+            await status.delete()
+            self._stop_typing(chat_id)
+            await self._app.bot.send_message(chat_id, "\u26a0\ufe0f Interrupted by new message")
+            raise  # Re-raise so the task is marked as cancelled
+
         except Exception as e:
             logger.error(f"Error handling message: {e}")
             await status.delete()
             self._stop_typing(chat_id)
-            await update.message.reply_text(f"Error: {e}")
+            await self._app.bot.send_message(chat_id, f"Error: {e}")
 
 
 # --- Live status message tracker ---
@@ -481,8 +518,9 @@ def _tool_detail(name: str, input_data: dict) -> str:
 class _StatusTracker:
     """Manages a single Telegram message that shows live agent progress.
 
-    Edits the message in-place as thinking/tool events arrive, throttled
-    to avoid Telegram rate limits (max one edit per second).
+    Shows elapsed time (always ticking) + tool call history. Edits the
+    message once per second to keep the user informed even during long
+    stretches without tool events.
     """
 
     def __init__(self, app: Application, chat_id: int, message_id: int):
@@ -491,30 +529,33 @@ class _StatusTracker:
         self._message_id = message_id
         self._thinking = False
         self._steps: list[str] = []
-        self._dirty = False
         self._deleted = False
         self._flush_task: asyncio.Task | None = None
-        # Start background flush loop
+        self._start_time = asyncio.get_event_loop().time()
+        self._last_text = ""
+        # Start background flush loop - ticks every second
         self._flush_task = asyncio.create_task(self._flush_loop())
+
+    def _elapsed(self) -> str:
+        secs = int(asyncio.get_event_loop().time() - self._start_time)
+        if secs < 60:
+            return f"{secs}s"
+        return f"{secs // 60}m{secs % 60:02d}s"
 
     async def on_thinking(self, text: str):
         if not self._thinking:
             self._thinking = True
             self._steps.append("\U0001f9e0 Thinking...")
-            self._dirty = True
 
     async def on_tool(self, name: str, input_data: dict):
         detail = _tool_detail(name, input_data)
         self._steps.append(detail)
-        self._dirty = True
 
     async def _flush_loop(self):
-        """Edit the status message at most once per second."""
+        """Edit the status message every second with elapsed time."""
         try:
             while not self._deleted:
-                if self._dirty:
-                    self._dirty = False
-                    await self._edit()
+                await self._edit()
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass
@@ -524,16 +565,23 @@ class _StatusTracker:
         if self._deleted or not self._app:
             return
 
-        lines = self._steps[-8:]  # Show last 8 steps to avoid message bloat
-        body = "\n".join(lines)
+        elapsed = self._elapsed()
+        lines = self._steps[-8:]  # Show last 8 steps
+        header = f"\u23f3 {elapsed}"
+        body = header + "\n" + "\n".join(lines) if lines else header
+
+        # Skip edit if text hasn't changed (avoids Telegram error)
+        if body == self._last_text:
+            return
+        self._last_text = body
+
         try:
             await self._app.bot.edit_message_text(
                 chat_id=self._chat_id,
                 message_id=self._message_id,
-                text=body or "\u23f3 Working...",
+                text=body,
             )
         except Exception:
-            # Telegram may reject edits if content hasn't changed
             pass
 
     async def delete(self):
