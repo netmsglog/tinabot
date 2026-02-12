@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
 
 from loguru import logger
 from telegram import BotCommand, Update
@@ -25,6 +28,21 @@ from tinabot.scheduler import ScheduleStore
 
 # Max Telegram message length
 MAX_MSG_LEN = 4096
+
+# Words treated as "confirm pending photo" (case-insensitive)
+_CONFIRM_WORDS = frozenset({
+    "ok", "okay", "y", "yes", "确认", "好", "好的", "是", "嗯", "行",
+    "go", "proceed", "确定", "可以", "没问题", "对",
+})
+
+
+@dataclass
+class _PendingPhoto:
+    """A photo waiting for user confirmation before sending to agent."""
+
+    file_path: str  # Local path where image was saved
+    caption: str  # User's caption or default prompt
+    image: ImageInput  # Base64-encoded image for multimodal
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -147,6 +165,7 @@ class TelegramBot:
         self._typing_tasks: dict[int, asyncio.Task] = {}
         self._processing: dict[int, asyncio.Task] = {}  # chat_id -> agent task
         self._shutdown_event: asyncio.Event | None = None
+        self._pending_photos: dict[int, _PendingPhoto] = {}  # chat_id -> pending
         # Groq client for voice transcription
         self._groq: AsyncGroq | None = None
         if config.groq_api_key:
@@ -454,7 +473,29 @@ class TelegramBot:
         # Interrupt any in-flight agent call for this chat
         await self._cancel_processing(chat_id)
 
-        # Wrap the actual work in a trackable task
+        # Check for pending photo
+        pending = self._pending_photos.pop(chat_id, None)
+        if pending:
+            # Confirmation or new instruction — use pending photo
+            is_confirm = text.strip().lower() in _CONFIRM_WORDS
+            prompt = pending.caption if is_confirm else text
+            # Append file path so agent knows where the image is on disk
+            full_prompt = (
+                f"{prompt}\n\n"
+                f"[Image is saved at: {pending.file_path}]"
+            )
+            proc_task = asyncio.create_task(
+                self._process_message(
+                    chat_id, full_prompt, update, images=[pending.image]
+                )
+            )
+            self._processing[chat_id] = proc_task
+            proc_task.add_done_callback(
+                lambda _: self._processing.pop(chat_id, None)
+            )
+            return
+
+        # Normal text message
         proc_task = asyncio.create_task(self._process_message(chat_id, text, update))
         self._processing[chat_id] = proc_task
 
@@ -462,12 +503,12 @@ class TelegramBot:
         proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
 
     async def _on_photo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Handle incoming photo messages (photo + optional caption)."""
+        """Handle photo: save to disk, confirm with user, wait for next message."""
         if not update.message or not await self._check_allowed(update):
             return
 
         chat_id = update.message.chat_id
-        text = update.message.caption or "What's in this image?"
+        caption = update.message.caption or ""
 
         # Download the largest photo (last in the list)
         photo = update.message.photo[-1]
@@ -479,17 +520,38 @@ class TelegramBot:
             await update.message.reply_text(f"Failed to download photo: {e}")
             return
 
+        # Save to ~/.tinabot/data/images/
+        images_dir = Path("~/.tinabot/data/images").expanduser()
+        images_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{int(time.time())}_{photo.file_unique_id}.jpg"
+        file_path = images_dir / filename
+        file_path.write_bytes(data)
+
         b64 = base64.b64encode(data).decode("utf-8")
-        # Telegram sends photos as JPEG
         image = ImageInput(data=b64, media_type="image/jpeg")
 
-        await self._cancel_processing(chat_id)
+        default_caption = "Describe this image"
+        prompt = caption or default_caption
 
-        proc_task = asyncio.create_task(
-            self._process_message(chat_id, text, update, images=[image])
+        # Store pending photo
+        self._pending_photos[chat_id] = _PendingPhoto(
+            file_path=str(file_path),
+            caption=prompt,
+            image=image,
         )
-        self._processing[chat_id] = proc_task
-        proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
+
+        # Show confirmation to user
+        if caption:
+            await update.message.reply_text(
+                f"\U0001f4f7 Image saved\n"
+                f"Request: {caption}\n\n"
+                f"Reply OK to confirm, or type a different instruction."
+            )
+        else:
+            await update.message.reply_text(
+                f"\U0001f4f7 Image saved\n\n"
+                f"What would you like to do with this image? Type your request."
+            )
 
     async def _on_voice(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle voice/audio messages: transcribe with Groq Whisper, then send text to agent."""
