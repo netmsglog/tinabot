@@ -527,8 +527,8 @@ class _StatusTracker:
         self._app = app
         self._chat_id = chat_id
         self._message_id = message_id
-        self._thinking = False
-        self._steps: list[str] = []
+        self._thinking = True
+        self._steps: list[str] = ["\U0001f9e0 Thinking..."]
         self._deleted = False
         self._flush_task: asyncio.Task | None = None
         self._start_time = asyncio.get_event_loop().time()
