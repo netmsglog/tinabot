@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 
 from loguru import logger
@@ -15,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 
-from tinabot.agent import TinaAgent
+from tinabot.agent import ImageInput, TinaAgent
 from tinabot.config import TelegramConfig
 from tinabot.memory import TaskMemory
 from tinabot.scheduler import ScheduleStore
@@ -198,9 +199,12 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("schedules", self._on_schedules))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
-        # Message handler
+        # Message handlers
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
+        )
+        self._app.add_handler(
+            MessageHandler(filters.PHOTO, self._on_photo)
         )
 
         logger.info("Starting Telegram bot (polling)...")
@@ -448,6 +452,36 @@ class TelegramBot:
         # Clean up reference when done (don't await - let it run)
         proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
 
+    async def _on_photo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle incoming photo messages (photo + optional caption)."""
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        chat_id = update.message.chat_id
+        text = update.message.caption or "What's in this image?"
+
+        # Download the largest photo (last in the list)
+        photo = update.message.photo[-1]
+        try:
+            file = await ctx.bot.get_file(photo.file_id)
+            data = await file.download_as_bytearray()
+        except Exception as e:
+            logger.error(f"Failed to download photo: {e}")
+            await update.message.reply_text(f"Failed to download photo: {e}")
+            return
+
+        b64 = base64.b64encode(data).decode("utf-8")
+        # Telegram sends photos as JPEG
+        image = ImageInput(data=b64, media_type="image/jpeg")
+
+        await self._cancel_processing(chat_id)
+
+        proc_task = asyncio.create_task(
+            self._process_message(chat_id, text, update, images=[image])
+        )
+        self._processing[chat_id] = proc_task
+        proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
+
     async def _cancel_processing(self, chat_id: int):
         """Cancel in-flight agent processing for a chat."""
         proc = self._processing.pop(chat_id, None)
@@ -459,7 +493,13 @@ class TelegramBot:
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
 
-    async def _process_message(self, chat_id: int, text: str, update: Update):
+    async def _process_message(
+        self,
+        chat_id: int,
+        text: str,
+        update: Update,
+        images: list[ImageInput] | None = None,
+    ):
         """Run agent and send response. Cancellable by new messages."""
         # Start typing
         self._start_typing(chat_id)
@@ -479,6 +519,7 @@ class TelegramBot:
                 on_thinking=status.on_thinking,
                 on_tool=status.on_tool,
                 chat_id=chat_id,
+                images=images,
             )
 
             # Delete the status message, then send the real response

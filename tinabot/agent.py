@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Awaitable
@@ -67,6 +68,14 @@ Summarize our conversation so far, capturing:
 4. Any pending items or next steps
 
 Be concise but preserve all important context needed to continue this work."""
+
+
+@dataclass
+class ImageInput:
+    """An image to include in a message to the agent."""
+
+    data: str  # base64-encoded image data
+    media_type: str  # e.g. "image/jpeg", "image/png"
 
 
 @dataclass
@@ -165,6 +174,35 @@ class TinaAgent:
             env=env,
         )
 
+    @staticmethod
+    def _make_multimodal_prompt(
+        message: str, images: list[ImageInput]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Build an AsyncIterable prompt with text + image content blocks."""
+
+        async def _gen() -> AsyncIterator[dict[str, Any]]:
+            content: list[dict[str, Any]] = []
+            for img in images:
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": img.data,
+                        },
+                    }
+                )
+            content.append({"type": "text", "text": message})
+            yield {
+                "type": "user",
+                "session_id": "",
+                "message": {"role": "user", "content": content},
+                "parent_tool_use_id": None,
+            }
+
+        return _gen()
+
     async def process(
         self,
         message: str,
@@ -173,6 +211,7 @@ class TinaAgent:
         on_thinking: OnThinking | None = None,
         on_tool: OnTool | None = None,
         chat_id: int | None = None,
+        images: list[ImageInput] | None = None,
     ) -> AgentResponse:
         """Process a user message through the agent.
 
@@ -183,6 +222,7 @@ class TinaAgent:
             on_thinking: Callback for thinking output.
             on_tool: Callback for tool use events (name, input).
             chat_id: Telegram chat ID (enables scheduling instructions).
+            images: Optional list of images to include in the message.
 
         Returns:
             AgentResponse with text, session info, and cost.
@@ -197,8 +237,13 @@ class TinaAgent:
         response = AgentResponse()
         text_parts: list[str] = []
 
+        # Build prompt: multimodal if images present, plain string otherwise
+        prompt: str | AsyncIterator[dict[str, Any]] = message
+        if images:
+            prompt = self._make_multimodal_prompt(message, images)
+
         try:
-            async for msg in query(prompt=message, options=options):
+            async for msg in query(prompt=prompt, options=options):
                 if isinstance(msg, SystemMessage):
                     if msg.subtype == "init":
                         session_id = msg.data.get("session_id")
