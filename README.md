@@ -10,6 +10,7 @@ A local AI agent powered by [Claude Agent SDK](https://github.com/anthropics/cla
 - **Per-Task Memory** — Each conversation is a "task" with its own session. Context is maintained across messages via SDK session resumption
 - **Auto-Compression** — When a task exceeds a configurable turn count, the conversation is summarized and a fresh session starts with the summary injected, bounding token costs
 - **Skills System** — Loads skill definitions from `~/.agents/skills/*/SKILL.md`. Small skills are inlined in the system prompt; large ones use progressive loading (agent reads the full file when needed)
+- **Scheduled Tasks** — Create recurring tasks from natural language (e.g. "每天9点搜reddit发给我"). Cron-based scheduler runs in background, executes the agent, and delivers results to Telegram
 - **Full Tool Access** — Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, Task — the same tools available in Claude Code
 
 ## Quick Start
@@ -42,6 +43,9 @@ tina skills       # List loaded skills
 tina user list    # Show Telegram allowlist
 tina user add ID  # Add a user to the allowlist
 tina user del ID  # Remove a user from the allowlist
+tina schedule list              # List all schedules
+tina schedule add --name "..." --cron "0 9 * * *" --prompt "..." --chat ID
+tina schedule del <id>          # Remove a schedule
 ```
 
 REPL commands:
@@ -75,7 +79,27 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 }
 ```
 
-Each Telegram chat gets its own isolated task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/skills`, `/help`.
+Each Telegram chat gets its own isolated task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/skills`, `/schedules`, `/help`.
+
+### Scheduled Tasks
+
+Tell Tina to create a recurring task in natural language:
+
+> "每天早上9点去reddit搜集关于openclaw的帖子，汇总发给我"
+
+Tina will create a schedule file automatically. The background scheduler checks every 30 seconds for due tasks, runs the agent, and delivers results to the Telegram chat.
+
+You can also manage schedules via CLI:
+
+```bash
+tina schedule add --name "reddit-digest" --cron "0 9 * * *" --prompt "Search reddit for openclaw posts and summarize" --chat 123456
+tina schedule list
+tina schedule del reddit-digest
+```
+
+Cron examples: `0 9 * * *` (daily 9am), `*/30 * * * *` (every 30min), `0 9 * * 1-5` (weekdays 9am).
+
+Schedules are stored as JSON files in `~/.tinabot/data/schedules/` and persist across restarts. Use `/schedules` in Telegram to list schedules for the current chat.
 
 ### User Management
 
@@ -182,6 +206,7 @@ Instructions for the agent...
 - **按任务记忆** — 每个对话是独立的"任务"，通过 SDK session 恢复保持上下文
 - **自动压缩** — 任务超过设定轮次后，自动总结对话并开启新 session（摘要注入 system prompt），控制 token 开销
 - **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载技能定义。小技能内联到 system prompt，大技能按需加载
+- **定时任务** — 用自然语言创建定时任务（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并将结果发送到 Telegram
 - **完整工具集** — Read、Write、Edit、Bash、Glob、Grep、WebSearch、WebFetch、Task — 与 Claude Code 相同的工具
 
 ## 快速开始
@@ -214,6 +239,9 @@ tina skills       # 列出已加载的技能
 tina user list    # 查看 Telegram 白名单
 tina user add ID  # 添加用户到白名单
 tina user del ID  # 从白名单移除用户
+tina schedule list              # 列出所有定时任务
+tina schedule add --name "..." --cron "0 9 * * *" --prompt "..." --chat ID
+tina schedule del <id>          # 删除定时任务
 ```
 
 REPL 命令：
@@ -247,7 +275,27 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 }
 ```
 
-每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/skills`、`/help`。
+每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/skills`、`/schedules`、`/help`。
+
+### 定时任务
+
+用自然语言告诉 Tina 创建定时任务：
+
+> "每天早上9点去reddit搜集关于openclaw的帖子，汇总发给我"
+
+Tina 会自动创建定时任务文件。后台调度器每 30 秒检查一次，到时间后执行 Agent 并将结果发送到 Telegram 聊天。
+
+也可以通过 CLI 管理：
+
+```bash
+tina schedule add --name "reddit摘要" --cron "0 9 * * *" --prompt "搜索reddit上关于openclaw的帖子并汇总" --chat 123456
+tina schedule list
+tina schedule del reddit-digest
+```
+
+Cron 示例：`0 9 * * *`（每天9点）、`*/30 * * * *`（每30分钟）、`0 9 * * 1-5`（工作日9点）。
+
+定时任务以 JSON 文件存储在 `~/.tinabot/data/schedules/`，重启后自动恢复。在 Telegram 中使用 `/schedules` 查看当前聊天的定时任务。
 
 ### 用户管理
 

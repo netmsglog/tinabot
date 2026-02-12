@@ -275,6 +275,66 @@ def skills():
             console.print(f"  {s['name']}: {s['description']}", style="cyan")
 
 
+schedule_cli = typer.Typer(help="Manage scheduled tasks")
+app_cli.add_typer(schedule_cli, name="schedule")
+
+
+@schedule_cli.command("list")
+def schedule_list():
+    """List all schedules."""
+    from tinabot.scheduler import ScheduleStore
+
+    config = Config.load()
+    store = ScheduleStore(config.memory.data_dir)
+    schedules = store.list()
+    if not schedules:
+        console.print("No schedules.", style="dim")
+    else:
+        for s in schedules:
+            status = "on" if s.enabled else "off"
+            last = s.last_run[:16] if s.last_run else "never"
+            console.print(
+                f"  [{s.id}] {s.name}\n"
+                f"    cron: {s.cron}  chat: {s.chat_id}  status: {status}  last: {last}"
+            )
+
+
+@schedule_cli.command("add")
+def schedule_add(
+    name: str = typer.Option(..., "--name", "-n", help="Schedule name"),
+    cron: str = typer.Option(..., "--cron", "-c", help='Cron expression, e.g. "0 9 * * *"'),
+    prompt: str = typer.Option(..., "--prompt", "-p", help="Prompt to run"),
+    chat: int = typer.Option(..., "--chat", help="Telegram chat ID for delivery"),
+):
+    """Add a new schedule."""
+    from croniter import croniter
+    from tinabot.scheduler import ScheduleStore
+
+    if not croniter.is_valid(cron):
+        console.print(f"Invalid cron expression: {cron}", style="red")
+        raise typer.Exit(1)
+
+    config = Config.load()
+    store = ScheduleStore(config.memory.data_dir)
+    s = store.add(name=name, cron=cron, prompt=prompt, chat_id=chat)
+    console.print(f"Created schedule [{s.id}] {s.name}  cron: {s.cron}", style="green")
+
+
+@schedule_cli.command("del")
+def schedule_del(
+    schedule_id: str = typer.Argument(..., help="Schedule ID to remove"),
+):
+    """Remove a schedule."""
+    from tinabot.scheduler import ScheduleStore
+
+    config = Config.load()
+    store = ScheduleStore(config.memory.data_dir)
+    if store.remove(schedule_id):
+        console.print(f"Removed schedule '{schedule_id}'", style="green")
+    else:
+        console.print(f"Schedule '{schedule_id}' not found", style="yellow")
+
+
 user_cli = typer.Typer(help="Manage Telegram allowed users")
 app_cli.add_typer(user_cli, name="user")
 

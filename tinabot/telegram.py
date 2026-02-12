@@ -18,6 +18,7 @@ from telegram.ext import (
 from tinabot.agent import TinaAgent
 from tinabot.config import TelegramConfig
 from tinabot.memory import TaskMemory
+from tinabot.scheduler import ScheduleStore
 
 # Max Telegram message length
 MAX_MSG_LEN = 4096
@@ -123,6 +124,7 @@ class TelegramBot:
         BotCommand("resume", "Resume a task by ID"),
         BotCommand("compress", "Compress current task"),
         BotCommand("skills", "List available skills"),
+        BotCommand("schedules", "List scheduled tasks"),
         BotCommand("help", "Show commands"),
     ]
 
@@ -131,10 +133,12 @@ class TelegramBot:
         config: TelegramConfig,
         agent: TinaAgent,
         memory: TaskMemory,
+        schedule_store: ScheduleStore | None = None,
     ):
         self.config = config
         self.agent = agent
         self.memory = memory
+        self.schedule_store = schedule_store
         self._app: Application | None = None
         self._chat_tasks: dict[int, str] = {}  # chat_id -> task_id
         self._typing_tasks: dict[int, asyncio.Task] = {}
@@ -191,6 +195,7 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("resume", self._on_resume))
         self._app.add_handler(CommandHandler("compress", self._on_compress))
         self._app.add_handler(CommandHandler("skills", self._on_skills))
+        self._app.add_handler(CommandHandler("schedules", self._on_schedules))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Message handler
@@ -262,6 +267,10 @@ class TelegramBot:
 
             # Fallback to plain text
             await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+
+    async def send_message(self, chat_id: int, text: str):
+        """Public interface for sending messages (used by Scheduler)."""
+        await self._send(chat_id, text)
 
     def _start_typing(self, chat_id: int):
         self._stop_typing(chat_id)
@@ -380,6 +389,29 @@ class TelegramBot:
         lines = [f"{s['name']}: {s['description']}" for s in skills]
         await update.message.reply_text("\n".join(lines))
 
+    async def _on_schedules(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        if not self.schedule_store:
+            await update.message.reply_text("Scheduling not available.")
+            return
+
+        chat_id = update.message.chat_id
+        schedules = self.schedule_store.list()
+        # Filter to this chat's schedules
+        mine = [s for s in schedules if s.chat_id == chat_id]
+        if not mine:
+            await update.message.reply_text("No schedules for this chat.")
+            return
+
+        lines = []
+        for s in mine:
+            status = "on" if s.enabled else "off"
+            last = s.last_run[:16] if s.last_run else "never"
+            lines.append(f"[{s.id}] {s.name}\n  cron: {s.cron}  status: {status}  last: {last}")
+        await update.message.reply_text("\n\n".join(lines))
+
     async def _on_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message:
             return
@@ -391,6 +423,7 @@ class TelegramBot:
             "/resume <id> - Switch to a task\n"
             "/compress - Compress current task\n"
             "/skills - List skills\n"
+            "/schedules - List scheduled tasks\n"
             "/help - This message\n\n"
             "Send any text message to chat!"
         )
@@ -445,6 +478,7 @@ class TelegramBot:
                 task=task,
                 on_thinking=status.on_thinking,
                 on_tool=status.on_tool,
+                chat_id=chat_id,
             )
 
             # Delete the status message, then send the real response

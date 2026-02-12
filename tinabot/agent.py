@@ -37,6 +37,28 @@ When you have skills available, use them to guide your approach. \
 You can read skill files for detailed instructions when needed.
 """
 
+SCHEDULING_PROMPT_TEMPLATE = """\
+## Scheduling
+
+You can create recurring scheduled tasks. To create one, use the Write tool to create a file at:
+  ~/.tinabot/data/schedules/<short-name>.json
+
+The file must contain valid JSON with these fields:
+{{
+  "name": "Human-readable description",
+  "cron": "minute hour day month weekday",
+  "prompt": "The full prompt the agent will execute each run",
+  "chat_id": {chat_id},
+  "enabled": true,
+  "created_at": "<current ISO timestamp>"
+}}
+
+Cron examples: "0 9 * * *" (daily 9am), "*/30 * * * *" (every 30min), "0 9 * * 1-5" (weekdays 9am), "0 0 * * 0" (weekly Sunday midnight).
+
+To delete a schedule, delete the file. To list schedules, read the directory ~/.tinabot/data/schedules/.
+When creating a schedule, always confirm to the user what was created and when it will run.
+"""
+
 COMPRESSION_PROMPT = """\
 Summarize our conversation so far, capturing:
 1. What was originally requested
@@ -78,7 +100,9 @@ class TinaAgent:
         self.skills = skills_loader
         self.memory = task_memory
 
-    def _build_system_prompt(self, task: Task) -> str:
+    def _build_system_prompt(
+        self, task: Task, chat_id: int | None = None
+    ) -> str:
         """Build the full system prompt with identity, skills, and task context."""
         parts = [IDENTITY_PROMPT]
 
@@ -86,6 +110,10 @@ class TinaAgent:
         skills_section = self.skills.build_system_prompt_section()
         if skills_section:
             parts.append(skills_section)
+
+        # Add scheduling instructions when chat_id is available
+        if chat_id is not None:
+            parts.append(SCHEDULING_PROMPT_TEMPLATE.format(chat_id=chat_id))
 
         # Add task summary if this is a compressed task resuming
         summary = self.memory.get_summary(task.id)
@@ -100,7 +128,9 @@ class TinaAgent:
 
         return "\n\n".join(parts)
 
-    def _build_options(self, task: Task) -> ClaudeAgentOptions:
+    def _build_options(
+        self, task: Task, chat_id: int | None = None
+    ) -> ClaudeAgentOptions:
         """Build SDK options for a query."""
         # Merge skill-provided tools with config tools
         all_tools = list(self.config.allowed_tools)
@@ -109,7 +139,7 @@ class TinaAgent:
             if tool not in all_tools:
                 all_tools.append(tool)
 
-        system_prompt = self._build_system_prompt(task)
+        system_prompt = self._build_system_prompt(task, chat_id=chat_id)
 
         # Determine resume behavior
         resume = None
@@ -142,6 +172,7 @@ class TinaAgent:
         on_text: OnText | None = None,
         on_thinking: OnThinking | None = None,
         on_tool: OnTool | None = None,
+        chat_id: int | None = None,
     ) -> AgentResponse:
         """Process a user message through the agent.
 
@@ -151,6 +182,7 @@ class TinaAgent:
             on_text: Callback for text output chunks.
             on_thinking: Callback for thinking output.
             on_tool: Callback for tool use events (name, input).
+            chat_id: Telegram chat ID (enables scheduling instructions).
 
         Returns:
             AgentResponse with text, session info, and cost.
@@ -161,7 +193,7 @@ class TinaAgent:
         if task is None:
             task = self.memory.create_task(message[:80])
 
-        options = self._build_options(task)
+        options = self._build_options(task, chat_id=chat_id)
         response = AgentResponse()
         text_parts: list[str] = []
 

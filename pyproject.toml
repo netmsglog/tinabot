@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",
     "loguru>=0.7",
     "typer>=0.9",
+    "croniter>=1.0",
 ]
 
 [project.scripts]
