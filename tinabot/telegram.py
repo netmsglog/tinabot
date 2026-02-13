@@ -859,7 +859,7 @@ class TelegramBot:
         status_msg = await self._app.bot.send_message(chat_id, "\u23f3 Thinking...")
         status = _StatusTracker(self._app, chat_id, status_msg.message_id)
         if status_note:
-            status._steps.insert(0, status_note)
+            status._done.insert(0, status_note)
 
         try:
             response = await self.agent.process(
@@ -944,22 +944,26 @@ def _tool_detail(name: str, input_data: dict) -> str:
 class _StatusTracker:
     """Manages a single Telegram message that shows live agent progress.
 
-    Shows elapsed time (always ticking) + tool call history. Edits the
-    message once per second to keep the user informed even during long
-    stretches without tool events.
+    Shows elapsed time, completed tool calls (✓), and the currently
+    running step with its own elapsed time. Edits the message once per
+    second.
     """
 
     def __init__(self, app: Application, chat_id: int, message_id: int):
         self._app = app
         self._chat_id = chat_id
         self._message_id = message_id
-        self._thinking = True
-        self._steps: list[str] = ["\U0001f9e0 Thinking..."]
         self._deleted = False
         self._flush_task: asyncio.Task | None = None
         self._start_time = asyncio.get_event_loop().time()
         self._last_text = ""
-        # Start background flush loop - ticks every second
+        # Completed steps: (description,)
+        self._done: list[str] = []
+        # Current step: (description, start_time) or None
+        self._current: tuple[str, float] | None = (
+            "\U0001f9e0 Thinking",
+            self._start_time,
+        )
         self._flush_task = asyncio.create_task(self._flush_loop())
 
     def _elapsed(self) -> str:
@@ -968,14 +972,30 @@ class _StatusTracker:
             return f"{secs}s"
         return f"{secs // 60}m{secs % 60:02d}s"
 
+    def _step_elapsed(self, start: float) -> str:
+        secs = int(asyncio.get_event_loop().time() - start)
+        if secs < 2:
+            return ""
+        if secs < 60:
+            return f" ({secs}s)"
+        return f" ({secs // 60}m{secs % 60:02d}s)"
+
+    def _finish_current(self):
+        """Move current step to done list."""
+        if self._current:
+            self._done.append(f"\u2705 {self._current[0]}")
+            self._current = None
+
     async def on_thinking(self, text: str):
-        if not self._thinking:
-            self._thinking = True
-            self._steps.append("\U0001f9e0 Thinking...")
+        if self._current and self._current[0].startswith("\U0001f9e0"):
+            return  # already thinking
+        self._finish_current()
+        self._current = ("\U0001f9e0 Thinking", asyncio.get_event_loop().time())
 
     async def on_tool(self, name: str, input_data: dict):
+        self._finish_current()
         detail = _tool_detail(name, input_data)
-        self._steps.append(detail)
+        self._current = (detail, asyncio.get_event_loop().time())
 
     async def _flush_loop(self):
         """Edit the status message every second with elapsed time."""
@@ -992,11 +1012,20 @@ class _StatusTracker:
             return
 
         elapsed = self._elapsed()
-        lines = self._steps[-8:]  # Show last 8 steps
         header = f"\u23f3 {elapsed}"
+
+        # Show last 6 completed steps + current
+        lines: list[str] = []
+        for step in self._done[-6:]:
+            lines.append(step)
+
+        if self._current:
+            desc, start = self._current
+            step_time = self._step_elapsed(start)
+            lines.append(f"\u25b6\ufe0f {desc}{step_time}")
+
         body = header + "\n" + "\n".join(lines) if lines else header
 
-        # Skip edit if text hasn't changed (avoids Telegram error)
         if body == self._last_text:
             return
         self._last_text = body
