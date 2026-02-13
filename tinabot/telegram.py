@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import re
 import time
 from dataclasses import dataclass
@@ -162,6 +163,8 @@ class TelegramBot:
         self.schedule_store = schedule_store
         self._app: Application | None = None
         self._chat_tasks: dict[int, str] = {}  # chat_id -> task_id
+        self._chat_tasks_path = Path(memory.data_dir) / "chat_tasks.json"
+        self._load_chat_tasks()
         self._typing_tasks: dict[int, asyncio.Task] = {}
         self._processing: dict[int, asyncio.Task] = {}  # chat_id -> agent task
         self._shutdown_event: asyncio.Event | None = None
@@ -170,6 +173,23 @@ class TelegramBot:
         self._groq: AsyncGroq | None = None
         if config.groq_api_key:
             self._groq = AsyncGroq(api_key=config.groq_api_key)
+
+    def _load_chat_tasks(self):
+        """Load chat_id -> task_id mapping from disk."""
+        if self._chat_tasks_path.exists():
+            try:
+                data = json.loads(self._chat_tasks_path.read_text())
+                for chat_id_str, task_id in data.items():
+                    # Validate that task still exists
+                    if self.memory.get_task(task_id):
+                        self._chat_tasks[int(chat_id_str)] = task_id
+            except Exception as e:
+                logger.warning(f"Failed to load chat_tasks: {e}")
+
+    def _save_chat_tasks(self):
+        """Persist chat_id -> task_id mapping to disk."""
+        data = {str(k): v for k, v in self._chat_tasks.items()}
+        self._chat_tasks_path.write_text(json.dumps(data, indent=2) + "\n")
 
     def _is_allowed(self, user_id: int) -> bool:
         """Check if user is in allowlist. Empty list = deny all."""
@@ -204,6 +224,7 @@ class TelegramBot:
         name = message[:80] if message else f"Telegram chat {chat_id}"
         task = self.memory.create_task(name)
         self._chat_tasks[chat_id] = task.id
+        self._save_chat_tasks()
         return task.id
 
     async def start(self):
@@ -347,6 +368,7 @@ class TelegramBot:
         name = update.message.text.replace("/new", "").strip() or "New task"
         task = self.memory.create_task(name)
         self._chat_tasks[chat_id] = task.id
+        self._save_chat_tasks()
         await update.message.reply_text(f"Created task [{task.id}] {task.name}")
 
     async def _on_tasks(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -385,6 +407,7 @@ class TelegramBot:
             return
 
         self._chat_tasks[chat_id] = task.id
+        self._save_chat_tasks()
         await update.message.reply_text(f"Resumed [{task.id}] {task.name}")
 
     async def _on_compress(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
