@@ -387,6 +387,19 @@ task_cli = typer.Typer(help="Manage tasks")
 app_cli.add_typer(task_cli, name="task")
 
 
+@task_cli.command("list")
+def task_list():
+    """List all tasks."""
+    config = Config.load()
+    tina = TinaApp(config)
+    task_list_ = tina.memory.list_tasks()
+    if not task_list_:
+        console.print("No tasks.", style="dim")
+    else:
+        for t in task_list_:
+            _print_task_info(t)
+
+
 @task_cli.command("del")
 def task_del(
     task_id: str = typer.Argument(..., help="Task ID to delete"),
