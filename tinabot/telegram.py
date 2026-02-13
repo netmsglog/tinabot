@@ -74,6 +74,7 @@ class _PendingDocument:
     file_path: str  # Local path where document was saved
     file_name: str  # Original filename
     caption: str  # User's caption or default prompt
+    size_bytes: int = 0  # File size
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -555,11 +556,25 @@ class TelegramBot:
         if pending_doc:
             is_confirm = text.strip().lower() in _CONFIRM_WORDS
             prompt = pending_doc.caption if is_confirm else text
-            full_prompt = (
-                f"{prompt}\n\n"
-                f"[File: {pending_doc.file_name}]\n"
-                f"[Saved at: {pending_doc.file_path}]"
+            size_kb = pending_doc.size_bytes / 1024
+            size_str = (
+                f"{size_kb:.0f}KB"
+                if size_kb < 1024
+                else f"{size_kb / 1024:.1f}MB"
             )
+            is_pdf = pending_doc.file_name.lower().endswith(".pdf")
+            hint_lines = [
+                f"[File: {pending_doc.file_name} ({size_str})]",
+                f"[Saved at: {pending_doc.file_path}]",
+            ]
+            if is_pdf:
+                hint_lines.append(
+                    "[IMPORTANT: This is a PDF. You MUST use the Read tool with "
+                    'the `pages` parameter (e.g. pages="1-10") to read it in '
+                    "chunks of at most 20 pages. Do NOT read the entire file at "
+                    "once or it will fail.]"
+                )
+            full_prompt = f"{prompt}\n\n" + "\n".join(hint_lines)
             proc_task = asyncio.create_task(
                 self._process_message(chat_id, full_prompt, update)
             )
@@ -661,17 +676,22 @@ class TelegramBot:
             file_path=str(file_path),
             file_name=orig_name,
             caption=prompt,
+            size_bytes=len(data),
         )
 
+        size_kb = len(data) / 1024
+        size_str = (
+            f"{size_kb:.0f}KB" if size_kb < 1024 else f"{size_kb / 1024:.1f}MB"
+        )
         if caption:
             await update.message.reply_text(
-                f"\U0001f4ce {orig_name} saved\n"
+                f"\U0001f4ce {orig_name} ({size_str}) saved\n"
                 f"Request: {caption}\n\n"
                 f"Reply OK to confirm, or type a different instruction."
             )
         else:
             await update.message.reply_text(
-                f"\U0001f4ce {orig_name} saved\n\n"
+                f"\U0001f4ce {orig_name} ({size_str}) saved\n\n"
                 f"What would you like to do with this file?\n"
                 f"Reply OK to summarize, or type your request."
             )
