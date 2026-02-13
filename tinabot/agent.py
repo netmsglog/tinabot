@@ -165,16 +165,31 @@ class TinaAgent:
         if chat_id is not None:
             parts.append(SCHEDULING_PROMPT_TEMPLATE.format(chat_id=chat_id))
 
-        # Add task summary if this is a compressed task resuming
-        summary = self.memory.get_summary(task.id)
-        if summary:
-            parts.append(
-                "<previous-context>\n"
-                "This is a continuation of a previous conversation. "
-                "Here is a summary of what happened:\n\n"
-                f"{summary}\n"
-                "</previous-context>"
-            )
+        # When session can't be resumed (compressed or lost), inject context
+        if not (task.session_id and task.summary is None):
+            context_parts: list[str] = []
+
+            summary = self.memory.get_summary(task.id)
+            if summary:
+                context_parts.append(
+                    "## Conversation Summary\n" + summary
+                )
+
+            last_resp = self.memory.get_last_response(task.id)
+            if last_resp:
+                context_parts.append(
+                    "## Your Last Response (for reference)\n" + last_resp
+                )
+
+            if context_parts:
+                parts.append(
+                    "<previous-context>\n"
+                    "This is a continuation of a previous conversation. "
+                    "The session history is not available, but here is "
+                    "what we know:\n\n"
+                    + "\n\n".join(context_parts)
+                    + "\n</previous-context>"
+                )
 
         return "\n\n".join(parts)
 
@@ -372,6 +387,10 @@ class TinaAgent:
             text_parts.append(f"Error: {e}")
 
         response.text = "\n".join(text_parts) if text_parts else ""
+
+        # Save last response as safety net (survives session loss / compression)
+        if response.text:
+            self.memory.save_last_response(task.id, response.text)
 
         # Update turn count (auto-compression disabled — use /compress manually)
         self.memory.increment_turns(task.id)

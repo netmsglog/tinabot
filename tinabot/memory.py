@@ -163,6 +163,22 @@ class TaskMemory:
             return summary_path.read_text(encoding="utf-8")
         return None
 
+    def save_last_response(self, task_id: str, text: str):
+        """Save the agent's last response for a task (safety net for context loss)."""
+        if not text:
+            return
+        resp_dir = self.data_dir / "last_responses"
+        resp_dir.mkdir(exist_ok=True)
+        # Truncate to avoid huge files (keep last 20k chars — plenty for any report)
+        (resp_dir / f"{task_id}.md").write_text(text[:20000], encoding="utf-8")
+
+    def get_last_response(self, task_id: str) -> str | None:
+        """Get the agent's last response for a task."""
+        path = self.data_dir / "last_responses" / f"{task_id}.md"
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        return None
+
     def delete_task(self, task_id: str) -> bool:
         """Delete a task and its summary."""
         if task_id not in self._tasks:
