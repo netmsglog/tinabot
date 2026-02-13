@@ -542,7 +542,8 @@ class TelegramBot:
             )
             proc_task = asyncio.create_task(
                 self._process_message(
-                    chat_id, full_prompt, update, images=[pending_photo.image]
+                    chat_id, full_prompt, update,
+                    images=[pending_photo.image], no_thinking=True,
                 )
             )
             self._processing[chat_id] = proc_task
@@ -576,7 +577,9 @@ class TelegramBot:
                 )
             full_prompt = f"{prompt}\n\n" + "\n".join(hint_lines)
             proc_task = asyncio.create_task(
-                self._process_message(chat_id, full_prompt, update)
+                self._process_message(
+                    chat_id, full_prompt, update, no_thinking=True,
+                )
             )
             self._processing[chat_id] = proc_task
             proc_task.add_done_callback(
@@ -773,6 +776,7 @@ class TelegramBot:
         update: Update,
         images: list[ImageInput] | None = None,
         status_note: str | None = None,
+        no_thinking: bool = False,
     ):
         """Run agent and send response. Cancellable by new messages."""
         # Start typing
@@ -796,6 +800,7 @@ class TelegramBot:
                 on_tool=status.on_tool,
                 chat_id=chat_id,
                 images=images,
+                no_thinking=no_thinking,
             )
 
             # Delete the status message, then send the real response

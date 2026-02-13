@@ -179,7 +179,10 @@ class TinaAgent:
         return "\n\n".join(parts)
 
     def _build_options(
-        self, task: Task, chat_id: int | None = None
+        self,
+        task: Task,
+        chat_id: int | None = None,
+        no_thinking: bool = False,
     ) -> ClaudeAgentOptions:
         """Build SDK options for a query."""
         # Merge skill-provided tools with config tools
@@ -204,9 +207,11 @@ class TinaAgent:
         cwd = Path(self.config.cwd).expanduser()
         cwd.mkdir(parents=True, exist_ok=True)
 
+        thinking_tokens = 0 if no_thinking else self.config.max_thinking_tokens
+
         return ClaudeAgentOptions(
             model=self.config.model,
-            max_thinking_tokens=self.config.max_thinking_tokens,
+            max_thinking_tokens=thinking_tokens,
             system_prompt=system_prompt,
             allowed_tools=all_tools,
             permission_mode=self.config.permission_mode,
@@ -269,6 +274,7 @@ class TinaAgent:
         on_tool: OnTool | None = None,
         chat_id: int | None = None,
         images: list[ImageInput] | None = None,
+        no_thinking: bool = False,
     ) -> AgentResponse:
         """Process a user message through the agent.
 
@@ -290,7 +296,7 @@ class TinaAgent:
         if task is None:
             task = self.memory.create_task(message[:80])
 
-        options = self._build_options(task, chat_id=chat_id)
+        options = self._build_options(task, chat_id=chat_id, no_thinking=no_thinking)
         response = AgentResponse()
         text_parts: list[str] = []
 
