@@ -9,6 +9,7 @@ description = "Local AI agent with CLI and Telegram interfaces"
 requires-python = ">=3.10"
 dependencies = [
     "claude-agent-sdk>=0.1.30",
+    "mcp>=1.8",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "rich>=13.0",
