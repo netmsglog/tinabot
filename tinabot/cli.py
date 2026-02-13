@@ -15,6 +15,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
+from tinabot.agent import AgentResponse
 from tinabot.app import TinaApp
 from tinabot.config import Config
 from tinabot.memory import Task
@@ -50,33 +51,30 @@ def _print_tool(name: str, input_data: dict):
     console.print(Text(f"  [{name}{detail}]", style="cyan dim"))
 
 
-def _print_response(
-    text: str,
-    cost: float | None,
-    turns: int,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-):
-    """Print the agent's response with rich markdown rendering."""
-    if text:
-        console.print()
-        console.print(Markdown(text))
+def _fmt_tokens(n: int) -> str:
+    tk = n / 1000
+    if tk < 0.1:
+        return f"{tk:.2f}k"
+    if tk < 10:
+        return f"{tk:.1f}k"
+    return f"{tk:.0f}k"
 
-    # Cost footer
+
+def _print_response(r: AgentResponse):
+    """Print the agent's response with rich markdown rendering."""
+    if r.text:
+        console.print()
+        console.print(Markdown(r.text))
+
+    # Cost footer: ↑5.2k ↓1.1k | $0.0534 | 3 turns
     footer_parts = []
-    total_tokens = input_tokens + output_tokens
-    if total_tokens > 0:
-        tk = total_tokens / 1000
-        if tk < 0.1:
-            footer_parts.append(f"{tk:.2f}k")
-        elif tk < 10:
-            footer_parts.append(f"{tk:.1f}k")
-        else:
-            footer_parts.append(f"{tk:.0f}k")
-    if cost is not None:
-        footer_parts.append(f"${cost:.4f}")
-    if turns > 0:
-        footer_parts.append(f"{turns} turn{'s' if turns != 1 else ''}")
+    if r.input_tokens or r.output_tokens:
+        in_total = r.input_tokens + r.cache_read_tokens + r.cache_creation_tokens
+        footer_parts.append(f"↑{_fmt_tokens(in_total)} ↓{_fmt_tokens(r.output_tokens)}")
+    if r.cost_usd is not None:
+        footer_parts.append(f"${r.cost_usd:.4f}")
+    if r.num_turns > 0:
+        footer_parts.append(f"{r.num_turns} turn{'s' if r.num_turns != 1 else ''}")
     if footer_parts:
         console.print(Text(" | ".join(footer_parts), style="dim"), justify="right")
 
@@ -154,13 +152,7 @@ async def _run_repl(tina: TinaApp):
             on_tool=_print_tool,
         )
 
-        _print_response(
-            response.text,
-            response.cost_usd,
-            response.num_turns,
-            response.input_tokens,
-            response.output_tokens,
-        )
+        _print_response(response)
 
 
 async def _handle_command(cmd: str, tina: TinaApp) -> str | None:

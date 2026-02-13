@@ -107,6 +107,14 @@ class ImageInput:
     media_type: str  # e.g. "image/jpeg", "image/png"
 
 
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    # model_prefix -> (input_$/MTok, output_$/MTok)
+    "claude-opus-4": (5.0, 25.0),
+    "claude-sonnet-4": (3.0, 15.0),
+    "claude-haiku-4": (1.0, 5.0),
+}
+
+
 @dataclass
 class AgentResponse:
     """Response from an agent interaction."""
@@ -116,6 +124,8 @@ class AgentResponse:
     cost_usd: float | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     thinking: str = ""
     num_turns: int = 0
     tool_uses: list[str] = field(default_factory=list)
@@ -204,6 +214,22 @@ class TinaAgent:
             resume=resume,
             env=env,
         )
+
+    def _estimate_cost(self, response: AgentResponse) -> float:
+        """Estimate cost from token counts using known model pricing."""
+        in_price, out_price = 5.0, 25.0  # default to Opus pricing
+        for prefix, (ip, op) in MODEL_PRICING.items():
+            if self.config.model.startswith(prefix):
+                in_price, out_price = ip, op
+                break
+        # cache reads are 10% of input price, cache writes are 125%
+        cost = (
+            response.input_tokens * in_price
+            + response.cache_read_tokens * in_price * 0.1
+            + response.cache_creation_tokens * in_price * 1.25
+            + response.output_tokens * out_price
+        ) / 1_000_000
+        return cost
 
     @staticmethod
     def _make_multimodal_prompt(
@@ -313,6 +339,17 @@ class TinaAgent:
                         logger.debug(f"Usage: {msg.usage}")
                         response.input_tokens = msg.usage.get("input_tokens", 0)
                         response.output_tokens = msg.usage.get("output_tokens", 0)
+                        response.cache_read_tokens = msg.usage.get(
+                            "cache_read_input_tokens", 0
+                        )
+                        response.cache_creation_tokens = msg.usage.get(
+                            "cache_creation_input_tokens", 0
+                        )
+                    # Fallback: calculate cost from tokens if SDK didn't provide it
+                    if response.cost_usd is None and (
+                        response.input_tokens or response.output_tokens
+                    ):
+                        response.cost_usd = self._estimate_cost(response)
                     self.memory.update_session_id(task.id, msg.session_id)
 
         except Exception as e:

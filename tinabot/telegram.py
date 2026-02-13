@@ -22,7 +22,7 @@ from telegram.ext import (
 
 from groq import AsyncGroq
 
-from tinabot.agent import ImageInput, TinaAgent
+from tinabot.agent import AgentResponse, ImageInput, TinaAgent
 from tinabot.config import TelegramConfig
 from tinabot.memory import TaskMemory
 from tinabot.scheduler import ScheduleStore
@@ -35,6 +35,27 @@ _CONFIRM_WORDS = frozenset({
     "ok", "okay", "y", "yes", "确认", "好", "好的", "是", "嗯", "行",
     "go", "proceed", "确定", "可以", "没问题", "对",
 })
+
+
+def _fmt_tokens(n: int) -> str:
+    """Format token count in k units: 0.05k, 5.2k, 11k."""
+    tk = n / 1000
+    if tk < 0.1:
+        return f"{tk:.2f}k"
+    if tk < 10:
+        return f"{tk:.1f}k"
+    return f"{tk:.0f}k"
+
+
+def _format_usage_footer(r: AgentResponse) -> str:
+    """Build a compact usage footer like '↑5.2k ↓1.1k · $0.0534'."""
+    parts: list[str] = []
+    if r.input_tokens or r.output_tokens:
+        in_total = r.input_tokens + r.cache_read_tokens + r.cache_creation_tokens
+        parts.append(f"↑{_fmt_tokens(in_total)} ↓{_fmt_tokens(r.output_tokens)}")
+    if r.cost_usd is not None:
+        parts.append(f"${r.cost_usd:.4f}")
+    return " · ".join(parts)
 
 
 @dataclass
@@ -684,18 +705,8 @@ class TelegramBot:
 
             reply = response.text or "(no response)"
             if response.cost_usd is not None:
-                total_tokens = response.input_tokens + response.output_tokens
-                if total_tokens > 0:
-                    tk = total_tokens / 1000
-                    if tk < 0.1:
-                        token_str = f"{tk:.2f}k"
-                    elif tk < 10:
-                        token_str = f"{tk:.1f}k"
-                    else:
-                        token_str = f"{tk:.0f}k"
-                    reply += f"\n\n_{token_str} · ${response.cost_usd:.4f}_"
-                else:
-                    reply += f"\n\n_${response.cost_usd:.4f}_"
+                footer = _format_usage_footer(response)
+                reply += f"\n\n_{footer}_"
 
             await self._send(chat_id, reply)
 
