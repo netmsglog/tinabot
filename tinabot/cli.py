@@ -66,11 +66,14 @@ def _print_response(r: AgentResponse):
         console.print()
         console.print(Markdown(r.text))
 
-    # Cost footer: ↑5.2k ↓1.1k | $0.0534 | 3 turns
+    # Cost footer: ↑5.2k ⚡40k ↓1.1k | $0.0534 | 3 turns
     footer_parts = []
     if r.input_tokens or r.output_tokens:
-        in_total = r.input_tokens + r.cache_read_tokens + r.cache_creation_tokens
-        footer_parts.append(f"↑{_fmt_tokens(in_total)} ↓{_fmt_tokens(r.output_tokens)}")
+        token_parts = [f"↑{_fmt_tokens(r.input_tokens)}"]
+        if r.cache_read_tokens:
+            token_parts.append(f"⚡{_fmt_tokens(r.cache_read_tokens)}")
+        token_parts.append(f"↓{_fmt_tokens(r.output_tokens)}")
+        footer_parts.append(" ".join(token_parts))
     if r.cost_usd is not None:
         footer_parts.append(f"${r.cost_usd:.4f}")
     if r.num_turns > 0:

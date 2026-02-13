@@ -48,11 +48,19 @@ def _fmt_tokens(n: int) -> str:
 
 
 def _format_usage_footer(r: AgentResponse) -> str:
-    """Build a compact usage footer like '↑5.2k ↓1.1k · $0.0534'."""
+    """Build a compact usage footer.
+
+    Examples:
+      ↑5.2k ↓1.1k · $0.0534            (no cache)
+      ↑5.2k ⚡40k ↓1.1k · $0.0234      (with cache reads)
+    """
     parts: list[str] = []
     if r.input_tokens or r.output_tokens:
-        in_total = r.input_tokens + r.cache_read_tokens + r.cache_creation_tokens
-        parts.append(f"↑{_fmt_tokens(in_total)} ↓{_fmt_tokens(r.output_tokens)}")
+        token_parts = [f"↑{_fmt_tokens(r.input_tokens)}"]
+        if r.cache_read_tokens:
+            token_parts.append(f"⚡{_fmt_tokens(r.cache_read_tokens)}")
+        token_parts.append(f"↓{_fmt_tokens(r.output_tokens)}")
+        parts.append(" ".join(token_parts))
     if r.cost_usd is not None:
         parts.append(f"${r.cost_usd:.4f}")
     return " · ".join(parts)
