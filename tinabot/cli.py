@@ -50,7 +50,13 @@ def _print_tool(name: str, input_data: dict):
     console.print(Text(f"  [{name}{detail}]", style="cyan dim"))
 
 
-def _print_response(text: str, cost: float | None, turns: int):
+def _print_response(
+    text: str,
+    cost: float | None,
+    turns: int,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+):
     """Print the agent's response with rich markdown rendering."""
     if text:
         console.print()
@@ -58,6 +64,15 @@ def _print_response(text: str, cost: float | None, turns: int):
 
     # Cost footer
     footer_parts = []
+    total_tokens = input_tokens + output_tokens
+    if total_tokens > 0:
+        tk = total_tokens / 1000
+        if tk < 0.1:
+            footer_parts.append(f"{tk:.2f}k")
+        elif tk < 10:
+            footer_parts.append(f"{tk:.1f}k")
+        else:
+            footer_parts.append(f"{tk:.0f}k")
     if cost is not None:
         footer_parts.append(f"${cost:.4f}")
     if turns > 0:
@@ -139,7 +154,13 @@ async def _run_repl(tina: TinaApp):
             on_tool=_print_tool,
         )
 
-        _print_response(response.text, response.cost_usd, response.num_turns)
+        _print_response(
+            response.text,
+            response.cost_usd,
+            response.num_turns,
+            response.input_tokens,
+            response.output_tokens,
+        )
 
 
 async def _handle_command(cmd: str, tina: TinaApp) -> str | None:

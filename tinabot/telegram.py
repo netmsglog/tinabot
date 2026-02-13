@@ -684,7 +684,18 @@ class TelegramBot:
 
             reply = response.text or "(no response)"
             if response.cost_usd is not None:
-                reply += f"\n\n_${response.cost_usd:.4f}_"
+                total_tokens = response.input_tokens + response.output_tokens
+                if total_tokens > 0:
+                    tk = total_tokens / 1000
+                    if tk < 0.1:
+                        token_str = f"{tk:.2f}k"
+                    elif tk < 10:
+                        token_str = f"{tk:.1f}k"
+                    else:
+                        token_str = f"{tk:.0f}k"
+                    reply += f"\n\n_{token_str} · ${response.cost_usd:.4f}_"
+                else:
+                    reply += f"\n\n_${response.cost_usd:.4f}_"
 
             await self._send(chat_id, reply)
 

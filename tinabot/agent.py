@@ -114,6 +114,8 @@ class AgentResponse:
     text: str = ""
     session_id: str | None = None
     cost_usd: float | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
     thinking: str = ""
     num_turns: int = 0
     tool_uses: list[str] = field(default_factory=list)
@@ -307,6 +309,10 @@ class TinaAgent:
                     response.session_id = msg.session_id
                     response.cost_usd = msg.total_cost_usd
                     response.num_turns = msg.num_turns
+                    if msg.usage:
+                        logger.debug(f"Usage: {msg.usage}")
+                        response.input_tokens = msg.usage.get("input_tokens", 0)
+                        response.output_tokens = msg.usage.get("output_tokens", 0)
                     self.memory.update_session_id(task.id, msg.session_id)
 
         except Exception as e:
