@@ -297,6 +297,12 @@ class TinaAgent:
             task = self.memory.create_task(message[:80])
 
         options = self._build_options(task, chat_id=chat_id, no_thinking=no_thinking)
+        logger.info(
+            f"process task={task.id} session={task.session_id} "
+            f"resume={'yes' if options.resume else 'no'} "
+            f"summary={'yes' if task.summary else 'no'} "
+            f"turns={task.turn_count}"
+        )
         response = AgentResponse()
         text_parts: list[str] = []
 
@@ -313,6 +319,9 @@ class TinaAgent:
                         if session_id:
                             response.session_id = session_id
                             self.memory.update_session_id(task.id, session_id)
+                            logger.debug(
+                                f"Session init: task={task.id} session={session_id}"
+                            )
 
                 elif isinstance(msg, AssistantMessage):
                     for block in msg.content:
