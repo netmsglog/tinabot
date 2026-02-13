@@ -373,14 +373,28 @@ class TinaAgent:
 
     async def _compress_task(self, task: Task):
         """Compress a task's conversation by summarizing it."""
+        if not task.session_id:
+            logger.warning(f"Cannot compress task {task.id}: no session_id")
+            return
+
         logger.info(f"Compressing task {task.id} ({task.turn_count} turns)")
+
+        env = {}
+        if self.config.api_key:
+            env["ANTHROPIC_API_KEY"] = self.config.api_key
+
+        cwd = Path(self.config.cwd).expanduser()
+        cwd.mkdir(parents=True, exist_ok=True)
 
         try:
             options = ClaudeAgentOptions(
                 model=self.config.model,
+                max_thinking_tokens=0,
                 resume=task.session_id,
                 max_turns=1,
-                permission_mode="plan",  # Read-only for summarization
+                permission_mode="plan",
+                cwd=str(cwd),
+                env=env,
             )
 
             summary_parts: list[str] = []
@@ -394,9 +408,18 @@ class TinaAgent:
                 summary = "\n".join(summary_parts)
                 self.memory.save_summary(task.id, summary)
                 logger.info(f"Task {task.id} compressed ({len(summary)} chars)")
+            else:
+                logger.warning(f"Compression returned empty for task {task.id}")
 
         except Exception as e:
             logger.error(f"Compression failed for task {task.id}: {e}")
+            # Don't block the user — mark as compressed with a fallback summary
+            # so we don't retry every turn
+            self.memory.save_summary(
+                task.id,
+                f"(Compression failed — previous session had {task.turn_count} turns)",
+            )
+            logger.info(f"Saved fallback summary for task {task.id}")
 
     async def force_compress(self, task: Task) -> str | None:
         """Force compress a task regardless of turn count."""
