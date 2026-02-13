@@ -18,6 +18,7 @@ class AgentConfig(BaseModel):
     permission_mode: str = "acceptEdits"
     cwd: str = str(Path.home() / ".tinabot" / "workspace")
     api_key: str = ""  # ANTHROPIC_API_KEY, optional (falls back to claude login)
+    timeout_seconds: int = 300  # Max time per agent call (0 = no limit)
     allowed_tools: list[str] = Field(default_factory=lambda: [
         "Read", "Write", "Edit", "Bash", "Glob", "Grep",
         "WebSearch", "WebFetch", "Task",

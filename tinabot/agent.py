@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -326,62 +327,78 @@ class TinaAgent:
         if images:
             prompt = self._make_multimodal_prompt(message, images)
 
+        timeout = self.config.timeout_seconds or None
         try:
-            async for msg in query(prompt=prompt, options=options):
-                if isinstance(msg, SystemMessage):
-                    if msg.subtype == "init":
-                        session_id = msg.data.get("session_id")
-                        if session_id:
-                            response.session_id = session_id
-                            self.memory.update_session_id(task.id, session_id)
-                            logger.debug(
-                                f"Session init: task={task.id} session={session_id}"
+            async with asyncio.timeout(timeout):
+                async for msg in query(prompt=prompt, options=options):
+                    if isinstance(msg, SystemMessage):
+                        if msg.subtype == "init":
+                            session_id = msg.data.get("session_id")
+                            if session_id:
+                                response.session_id = session_id
+                                self.memory.update_session_id(
+                                    task.id, session_id
+                                )
+                                logger.debug(
+                                    f"Session init: task={task.id} "
+                                    f"session={session_id}"
+                                )
+
+                    elif isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, TextBlock):
+                                text_parts.append(block.text)
+                                if on_text:
+                                    result = on_text(block.text)
+                                    if hasattr(result, "__await__"):
+                                        await result
+
+                            elif isinstance(block, ThinkingBlock):
+                                response.thinking += block.thinking
+                                if on_thinking:
+                                    result = on_thinking(block.thinking)
+                                    if hasattr(result, "__await__"):
+                                        await result
+
+                            elif isinstance(block, ToolUseBlock):
+                                response.tool_uses.append(block.name)
+                                if on_tool:
+                                    result = on_tool(block.name, block.input)
+                                    if hasattr(result, "__await__"):
+                                        await result
+
+                    elif isinstance(msg, ResultMessage):
+                        response.session_id = msg.session_id
+                        response.cost_usd = msg.total_cost_usd
+                        response.num_turns = msg.num_turns
+                        if msg.usage:
+                            logger.debug(f"Usage: {msg.usage}")
+                            response.input_tokens = msg.usage.get(
+                                "input_tokens", 0
                             )
-
-                elif isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            text_parts.append(block.text)
-                            if on_text:
-                                result = on_text(block.text)
-                                if hasattr(result, "__await__"):
-                                    await result
-
-                        elif isinstance(block, ThinkingBlock):
-                            response.thinking += block.thinking
-                            if on_thinking:
-                                result = on_thinking(block.thinking)
-                                if hasattr(result, "__await__"):
-                                    await result
-
-                        elif isinstance(block, ToolUseBlock):
-                            response.tool_uses.append(block.name)
-                            if on_tool:
-                                result = on_tool(block.name, block.input)
-                                if hasattr(result, "__await__"):
-                                    await result
-
-                elif isinstance(msg, ResultMessage):
-                    response.session_id = msg.session_id
-                    response.cost_usd = msg.total_cost_usd
-                    response.num_turns = msg.num_turns
-                    if msg.usage:
-                        logger.debug(f"Usage: {msg.usage}")
-                        response.input_tokens = msg.usage.get("input_tokens", 0)
-                        response.output_tokens = msg.usage.get("output_tokens", 0)
-                        response.cache_read_tokens = msg.usage.get(
-                            "cache_read_input_tokens", 0
+                            response.output_tokens = msg.usage.get(
+                                "output_tokens", 0
+                            )
+                            response.cache_read_tokens = msg.usage.get(
+                                "cache_read_input_tokens", 0
+                            )
+                            response.cache_creation_tokens = msg.usage.get(
+                                "cache_creation_input_tokens", 0
+                            )
+                        if response.cost_usd is None and (
+                            response.input_tokens or response.output_tokens
+                        ):
+                            response.cost_usd = self._estimate_cost(response)
+                        self.memory.update_session_id(
+                            task.id, msg.session_id
                         )
-                        response.cache_creation_tokens = msg.usage.get(
-                            "cache_creation_input_tokens", 0
-                        )
-                    # Fallback: calculate cost from tokens if SDK didn't provide it
-                    if response.cost_usd is None and (
-                        response.input_tokens or response.output_tokens
-                    ):
-                        response.cost_usd = self._estimate_cost(response)
-                    self.memory.update_session_id(task.id, msg.session_id)
 
+        except TimeoutError:
+            logger.warning(f"Agent timed out after {timeout}s for task {task.id}")
+            text_parts.append(
+                f"Request timed out after {timeout}s. "
+                "You can retry or send a simpler request."
+            )
         except Exception as e:
             logger.error(f"Agent error: {e}")
             text_parts.append(f"Error: {e}")
