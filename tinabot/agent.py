@@ -364,15 +364,21 @@ class TinaAgent:
 
         response.text = "\n".join(text_parts) if text_parts else ""
 
-        # Update turn count and check compression
-        turns = self.memory.increment_turns(task.id)
-        if self.memory.needs_compression(task):
-            await self._compress_task(task)
+        # Update turn count (auto-compression disabled — use /compress manually)
+        self.memory.increment_turns(task.id)
 
         return response
 
     async def _compress_task(self, task: Task):
-        """Compress a task's conversation by summarizing it."""
+        """Compress a task by asking the agent (via resumed session) to summarize.
+
+        IMPORTANT: This modifies the session (adds the compression prompt/response
+        to the conversation history), so it should only be called when we intend
+        to discard the session afterward (save_summary clears session_id).
+
+        Auto-compression is disabled — this is only called via force_compress
+        (i.e. user's /compress command).
+        """
         if not task.session_id:
             logger.warning(f"Cannot compress task {task.id}: no session_id")
             return
@@ -413,13 +419,6 @@ class TinaAgent:
 
         except Exception as e:
             logger.error(f"Compression failed for task {task.id}: {e}")
-            # Don't block the user — mark as compressed with a fallback summary
-            # so we don't retry every turn
-            self.memory.save_summary(
-                task.id,
-                f"(Compression failed — previous session had {task.turn_count} turns)",
-            )
-            logger.info(f"Saved fallback summary for task {task.id}")
 
     async def force_compress(self, task: Task) -> str | None:
         """Force compress a task regardless of turn count."""
