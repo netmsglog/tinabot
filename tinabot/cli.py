@@ -206,6 +206,36 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
             else:
                 console.print("Compression failed", style="red")
 
+    elif command == "/delete":
+        if not arg:
+            console.print("Usage: /delete <task_id>", style="yellow")
+        else:
+            task = tina.memory.get_task(arg)
+            if not task:
+                console.print(f"Task '{arg}' not found", style="yellow")
+            else:
+                tina.memory.delete_task(arg)
+                console.print(f"Deleted [{arg}] {task.name}", style="green")
+
+    elif command == "/export":
+        task_id = arg
+        if not task_id:
+            task = tina.memory.get_active_task()
+            if task:
+                task_id = task.id
+        if not task_id:
+            console.print("Usage: /export [task_id]", style="yellow")
+        else:
+            history = tina.memory.export_task_history(task_id)
+            if history:
+                from pathlib import Path
+
+                out = Path(f"task_{task_id}.md")
+                out.write_text(history, encoding="utf-8")
+                console.print(f"Exported to {out}", style="green")
+            else:
+                console.print("No conversation history found", style="yellow")
+
     elif command == "/skills":
         skills = tina.skills.list_skills()
         if not skills:
@@ -222,6 +252,8 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
                 "/tasks          List all tasks\n"
                 "/resume <id>    Switch to a task\n"
                 "/compress       Compress current task context\n"
+                "/delete <id>    Delete a task\n"
+                "/export [id]    Export conversation history\n"
                 "/skills         List loaded skills\n"
                 "/help           Show this help\n"
                 "/exit           Quit",
@@ -349,6 +381,51 @@ def schedule_del(
         console.print(f"Removed schedule '{schedule_id}'", style="green")
     else:
         console.print(f"Schedule '{schedule_id}' not found", style="yellow")
+
+
+task_cli = typer.Typer(help="Manage tasks")
+app_cli.add_typer(task_cli, name="task")
+
+
+@task_cli.command("del")
+def task_del(
+    task_id: str = typer.Argument(..., help="Task ID to delete"),
+):
+    """Delete a task and its associated data."""
+    config = Config.load()
+    tina = TinaApp(config)
+    task = tina.memory.get_task(task_id)
+    if not task:
+        console.print(f"Task '{task_id}' not found", style="yellow")
+        raise typer.Exit(1)
+    tina.memory.delete_task(task_id)
+    console.print(f"Deleted [{task_id}] {task.name}", style="green")
+
+
+@task_cli.command("export")
+def task_export(
+    task_id: str = typer.Argument(..., help="Task ID to export"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path"),
+):
+    """Export task conversation history as markdown."""
+    config = Config.load()
+    tina = TinaApp(config)
+    history = tina.memory.export_task_history(task_id)
+    if not history:
+        console.print(
+            f"No conversation history found for task '{task_id}'.\n"
+            "The task may have no session or the session file is missing.",
+            style="yellow",
+        )
+        raise typer.Exit(1)
+
+    if output:
+        from pathlib import Path
+
+        Path(output).write_text(history, encoding="utf-8")
+        console.print(f"Exported to {output}", style="green")
+    else:
+        console.print(history)
 
 
 user_cli = typer.Typer(help="Manage Telegram allowed users")

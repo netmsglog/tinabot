@@ -180,14 +180,93 @@ class TaskMemory:
         return None
 
     def delete_task(self, task_id: str) -> bool:
-        """Delete a task and its summary."""
+        """Delete a task and all associated files."""
         if task_id not in self._tasks:
             return False
 
         del self._tasks[task_id]
-        summary_path = self.data_dir / "summaries" / f"{task_id}.md"
-        if summary_path.exists():
-            summary_path.unlink()
+        for subdir in ("summaries", "last_responses"):
+            path = self.data_dir / subdir / f"{task_id}.md"
+            if path.exists():
+                path.unlink()
 
         self._save()
         return True
+
+    def export_task_history(self, task_id: str) -> str | None:
+        """Export a task's conversation history as text from the SDK session file.
+
+        Reads the session .jsonl file and extracts user/assistant text messages.
+        Returns formatted text, or None if session file not found.
+        """
+        task = self._tasks.get(task_id)
+        if not task or not task.session_id:
+            return None
+
+        # Session files live in ~/.claude/projects/<cwd-slug>/<session_id>.jsonl
+        # Try to find the session file
+        claude_dir = Path("~/.claude/projects").expanduser()
+        if not claude_dir.exists():
+            return None
+
+        session_file = None
+        for project_dir in claude_dir.iterdir():
+            candidate = project_dir / f"{task.session_id}.jsonl"
+            if candidate.exists():
+                session_file = candidate
+                break
+
+        if not session_file:
+            return None
+
+        lines: list[str] = []
+        try:
+            for raw in session_file.read_text(encoding="utf-8").splitlines():
+                if not raw.strip():
+                    continue
+                entry = json.loads(raw)
+                msg = entry if "role" in entry else entry.get("message", {})
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+
+                if role not in ("user", "assistant"):
+                    continue
+
+                # content can be a string or list of content blocks
+                if isinstance(content, str):
+                    text = content
+                elif isinstance(content, list):
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, str):
+                            text_parts.append(block)
+                        elif isinstance(block, dict):
+                            if block.get("type") == "text":
+                                text_parts.append(block.get("text", ""))
+                            elif block.get("type") == "tool_use":
+                                text_parts.append(
+                                    f"[Tool: {block.get('name', '?')}]"
+                                )
+                            elif block.get("type") == "tool_result":
+                                # Skip verbose tool results
+                                pass
+                    text = "\n".join(text_parts)
+                else:
+                    continue
+
+                if text.strip():
+                    label = "User" if role == "user" else "Tina"
+                    lines.append(f"### {label}\n\n{text.strip()}\n")
+        except Exception as e:
+            logger.warning(f"Failed to export task {task_id}: {e}")
+            return None
+
+        if not lines:
+            return None
+
+        header = (
+            f"# Task: {task.name}\n"
+            f"Created: {task.created_at}\n"
+            f"Turns: {task.turn_count}\n\n---\n\n"
+        )
+        return header + "\n---\n\n".join(lines)

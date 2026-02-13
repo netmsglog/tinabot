@@ -281,6 +281,8 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("tasks", self._on_tasks))
         self._app.add_handler(CommandHandler("resume", self._on_resume))
         self._app.add_handler(CommandHandler("compress", self._on_compress))
+        self._app.add_handler(CommandHandler("delete", self._on_delete))
+        self._app.add_handler(CommandHandler("export", self._on_export))
         self._app.add_handler(CommandHandler("skills", self._on_skills))
         self._app.add_handler(CommandHandler("schedules", self._on_schedules))
         self._app.add_handler(CommandHandler("help", self._on_help))
@@ -475,6 +477,63 @@ class TelegramBot:
         else:
             await update.message.reply_text("Compression failed")
 
+    async def _on_delete(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        chat_id = update.message.chat_id
+        task_id = update.message.text.replace("/delete", "").strip()
+
+        if not task_id:
+            # Delete current task
+            task_id = self._chat_tasks.get(chat_id)
+            if not task_id:
+                await update.message.reply_text("No active task. Usage: /delete [task_id]")
+                return
+
+        task = self.memory.get_task(task_id)
+        if not task:
+            await update.message.reply_text(f"Task '{task_id}' not found")
+            return
+
+        name = task.name
+        self.memory.delete_task(task_id)
+        # Remove from chat_tasks if it was the active task for any chat
+        for cid, tid in list(self._chat_tasks.items()):
+            if tid == task_id:
+                del self._chat_tasks[cid]
+        self._save_chat_tasks()
+        await update.message.reply_text(f"Deleted [{task_id}] {name}")
+
+    async def _on_export(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        chat_id = update.message.chat_id
+        task_id = update.message.text.replace("/export", "").strip()
+
+        if not task_id:
+            task_id = self._chat_tasks.get(chat_id)
+            if not task_id:
+                await update.message.reply_text("No active task. Usage: /export [task_id]")
+                return
+
+        task = self.memory.get_task(task_id)
+        if not task:
+            await update.message.reply_text(f"Task '{task_id}' not found")
+            return
+
+        history = self.memory.export_task_history(task_id)
+        if not history:
+            await update.message.reply_text("No conversation history found for this task.")
+            return
+
+        # Send as a file (markdown document)
+        import io
+        buf = io.BytesIO(history.encode("utf-8"))
+        buf.name = f"task_{task_id}.md"
+        await self._app.bot.send_document(chat_id, document=buf)
+
     async def _on_skills(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
             return
@@ -520,6 +579,8 @@ class TelegramBot:
             "/tasks - List tasks\n"
             "/resume <id> - Switch to a task\n"
             "/compress - Compress current task\n"
+            "/delete [id] - Delete current or specified task\n"
+            "/export [id] - Export conversation history as file\n"
             "/skills - List skills\n"
             "/schedules - List scheduled tasks\n"
             "/help - This message\n\n"
