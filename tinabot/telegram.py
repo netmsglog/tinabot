@@ -67,6 +67,15 @@ class _PendingPhoto:
     image: ImageInput  # Base64-encoded image for multimodal
 
 
+@dataclass
+class _PendingDocument:
+    """A document waiting for user confirmation before sending to agent."""
+
+    file_path: str  # Local path where document was saved
+    file_name: str  # Original filename
+    caption: str  # User's caption or default prompt
+
+
 def markdown_to_telegram_html(text: str) -> str:
     """Convert markdown to Telegram-safe HTML.
 
@@ -190,6 +199,7 @@ class TelegramBot:
         self._processing: dict[int, asyncio.Task] = {}  # chat_id -> agent task
         self._shutdown_event: asyncio.Event | None = None
         self._pending_photos: dict[int, _PendingPhoto] = {}  # chat_id -> pending
+        self._pending_documents: dict[int, _PendingDocument] = {}
         # Groq client for voice transcription
         self._groq: AsyncGroq | None = None
         if config.groq_api_key:
@@ -275,6 +285,9 @@ class TelegramBot:
         )
         self._app.add_handler(
             MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice)
+        )
+        self._app.add_handler(
+            MessageHandler(filters.Document.ALL, self._on_document)
         )
 
         logger.info("Starting Telegram bot (polling)...")
@@ -518,20 +531,37 @@ class TelegramBot:
         await self._cancel_processing(chat_id)
 
         # Check for pending photo
-        pending = self._pending_photos.pop(chat_id, None)
-        if pending:
-            # Confirmation or new instruction — use pending photo
+        pending_photo = self._pending_photos.pop(chat_id, None)
+        if pending_photo:
             is_confirm = text.strip().lower() in _CONFIRM_WORDS
-            prompt = pending.caption if is_confirm else text
-            # Append file path so agent knows where the image is on disk
+            prompt = pending_photo.caption if is_confirm else text
             full_prompt = (
                 f"{prompt}\n\n"
-                f"[Image is saved at: {pending.file_path}]"
+                f"[Image is saved at: {pending_photo.file_path}]"
             )
             proc_task = asyncio.create_task(
                 self._process_message(
-                    chat_id, full_prompt, update, images=[pending.image]
+                    chat_id, full_prompt, update, images=[pending_photo.image]
                 )
+            )
+            self._processing[chat_id] = proc_task
+            proc_task.add_done_callback(
+                lambda _: self._processing.pop(chat_id, None)
+            )
+            return
+
+        # Check for pending document
+        pending_doc = self._pending_documents.pop(chat_id, None)
+        if pending_doc:
+            is_confirm = text.strip().lower() in _CONFIRM_WORDS
+            prompt = pending_doc.caption if is_confirm else text
+            full_prompt = (
+                f"{prompt}\n\n"
+                f"[File: {pending_doc.file_name}]\n"
+                f"[Saved at: {pending_doc.file_path}]"
+            )
+            proc_task = asyncio.create_task(
+                self._process_message(chat_id, full_prompt, update)
             )
             self._processing[chat_id] = proc_task
             proc_task.add_done_callback(
@@ -595,6 +625,55 @@ class TelegramBot:
             await update.message.reply_text(
                 f"\U0001f4f7 Image saved\n\n"
                 f"What would you like to do with this image? Type your request."
+            )
+
+    async def _on_document(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle document: save to disk, confirm with user, wait for next message."""
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        chat_id = update.message.chat_id
+        doc = update.message.document
+        caption = update.message.caption or ""
+
+        # Download
+        try:
+            file = await ctx.bot.get_file(doc.file_id)
+            data = await file.download_as_bytearray()
+        except Exception as e:
+            logger.error(f"Failed to download document: {e}")
+            await update.message.reply_text(f"Failed to download document: {e}")
+            return
+
+        # Save to ~/.tinabot/data/files/
+        files_dir = Path("~/.tinabot/data/files").expanduser()
+        files_dir.mkdir(parents=True, exist_ok=True)
+        # Preserve original extension
+        orig_name = doc.file_name or "document"
+        safe_name = f"{int(time.time())}_{orig_name}"
+        file_path = files_dir / safe_name
+        file_path.write_bytes(data)
+
+        default_caption = f"Summarize the contents of this file"
+        prompt = caption or default_caption
+
+        self._pending_documents[chat_id] = _PendingDocument(
+            file_path=str(file_path),
+            file_name=orig_name,
+            caption=prompt,
+        )
+
+        if caption:
+            await update.message.reply_text(
+                f"\U0001f4ce {orig_name} saved\n"
+                f"Request: {caption}\n\n"
+                f"Reply OK to confirm, or type a different instruction."
+            )
+        else:
+            await update.message.reply_text(
+                f"\U0001f4ce {orig_name} saved\n\n"
+                f"What would you like to do with this file?\n"
+                f"Reply OK to summarize, or type your request."
             )
 
     async def _on_voice(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
