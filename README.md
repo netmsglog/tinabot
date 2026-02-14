@@ -2,6 +2,20 @@
 
 基于 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) 的本地 AI Agent，支持 CLI 和 Telegram 双接口。
 
+## Why Tinabot?
+
+[OpenClaw](https://github.com/anthropics/claude-code) (Claude Code) 是目前体验最好的本地 AI Agent，但它是闭源商业产品。Tinabot 是一个开源平替，目标是用纯 Python 实现同等体验：
+
+- **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI 和 Telegram 中，清楚知道 Agent 在做什么、做了多久
+- **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
+- **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住
+- **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
+- **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3、Gemini、Grok，随时在 config 里切换
+- **ChatGPT 订阅直接用** — 通过 OAuth 登录（`tina login openai`）直接使用 ChatGPT Plus/Pro 订阅额度，无需额外购买 API key
+- **Telegram 随身用** — 不在电脑前也能通过 Telegram 让 Agent 执行任务、定时任务、语音指令
+
+简单来说：**Claude Code 的丝滑体验 + 开源 + 多模型 + Telegram 移动端**。
+
 支持多种模型后端：**Claude**（通过 Agent SDK）、**OpenAI**（API key 或 ChatGPT OAuth 登录）、**Gemini**、**Grok**。
 
 ## 特性
@@ -305,6 +319,20 @@ always: true
 # Tinabot (English)
 
 A local AI agent powered by [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with CLI and Telegram interfaces.
+
+## Why Tinabot?
+
+[OpenClaw](https://github.com/anthropics/claude-code) (Claude Code) is the best local AI agent experience today, but it's a closed-source commercial product. Tinabot is an open-source alternative aiming for the same experience in pure Python:
+
+- **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI and Telegram
+- **Transparent token costs** — Each interaction shows input/output tokens and cost estimate (`↑5.2k ⚡40k ↓1.1k · $0.0534`)
+- **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI
+- **Reuse existing skills** — Compatible with Claude Code / Codex / OpenClaw `SKILL.md` skill format, reuses `~/.agents/skills/` directly
+- **Multi-model freedom** — Same tools and skills across Claude Opus, GPT-4o, o3, Gemini, Grok — switch in config
+- **ChatGPT subscription support** — OAuth login (`tina login openai`) uses your ChatGPT Plus/Pro subscription directly, no separate API key needed
+- **Telegram on the go** — Run agent tasks, schedules, and voice commands from your phone
+
+In short: **Claude Code experience + open source + multi-model + Telegram mobile**.
 
 Supports multiple model backends: **Claude** (via Agent SDK), **OpenAI** (API key or ChatGPT OAuth login), **Gemini**, **Grok**.
 

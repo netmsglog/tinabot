@@ -291,6 +291,7 @@ class OpenAIAgent:
         on_text: OnText | None = None,
         on_thinking: OnThinking | None = None,
         on_tool: OnTool | None = None,
+        images: list[dict] | None = None,
     ) -> OpenAIResult:
         """Run agent loop using the ChatGPT Backend Responses API.
 
@@ -304,6 +305,7 @@ class OpenAIAgent:
             on_text: Callback for text output chunks.
             on_thinking: Callback for thinking output (unused).
             on_tool: Callback for tool use events.
+            images: Optional list of {"data": base64, "media_type": "image/..."}.
 
         Returns:
             OpenAIResult with text, token counts, tool uses, and response_id.
@@ -320,8 +322,19 @@ class OpenAIAgent:
         # function_call items, and function_call_output items.
         history = self.message_store.get_messages(task_id)
 
-        # Append new user message
-        history.append({"role": "user", "content": user_message})
+        # Build user message — multimodal if images present
+        # Responses API uses "input_text" and "input_image" content types
+        if images:
+            content: list[dict[str, Any]] = []
+            for img in images:
+                content.append({
+                    "type": "input_image",
+                    "image_url": f"data:{img['media_type']};base64,{img['data']}",
+                })
+            content.append({"type": "input_text", "text": user_message})
+            history.append({"role": "user", "content": content})
+        else:
+            history.append({"role": "user", "content": user_message})
 
         # Build input_items = full history (for the API call within this turn)
         input_items: list[dict[str, Any]] = list(history)
