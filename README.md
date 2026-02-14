@@ -4,17 +4,19 @@
 
 ## Why Tinabot?
 
-[OpenClaw](https://github.com/anthropics/claude-code) (Claude Code) 是目前体验最好的本地 AI Agent，但它是闭源商业产品。Tinabot 是一个开源平替，目标是用纯 Python 实现同等体验：
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 是目前体验最好的本地 AI Agent，但它们只有终端界面 — 不在电脑前就用不了。Tinabot 的初衷是给它们**加一个 IM 界面**，让你通过 Telegram 随时远程操控家里/办公室的 Agent。
 
+在此基础上，Tinabot 用纯 Python 实现了完整的 Agent 体验：
+
+- **Telegram 远程操控** — 不在电脑前也能通过 Telegram 让 Agent 执行任务、定时任务、语音指令，随身携带你的 AI Agent
 - **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI 和 Telegram 中，清楚知道 Agent 在做什么、做了多久
 - **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
 - **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住
-- **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
+- **复用现有技能库** — 兼容 Claude Code / Codex / [OpenClaw](https://github.com/nicepkg/openclaw) 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
 - **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3、Gemini、Grok，随时在 config 里切换
 - **ChatGPT 订阅直接用** — 通过 OAuth 登录（`tina login openai`）直接使用 ChatGPT Plus/Pro 订阅额度，无需额外购买 API key
-- **Telegram 随身用** — 不在电脑前也能通过 Telegram 让 Agent 执行任务、定时任务、语音指令
 
-简单来说：**Claude Code 的丝滑体验 + 开源 + 多模型 + Telegram 移动端**。
+简单来说：**给 Claude Code / Codex 加上 Telegram 遥控 + 多模型支持**。
 
 支持多种模型后端：**Claude**（通过 Agent SDK）、**OpenAI**（API key 或 ChatGPT OAuth 登录）、**Gemini**、**Grok**。
 
@@ -322,17 +324,19 @@ A local AI agent powered by [Claude Agent SDK](https://github.com/anthropics/cla
 
 ## Why Tinabot?
 
-[OpenClaw](https://github.com/anthropics/claude-code) (Claude Code) is the best local AI agent experience today, but it's a closed-source commercial product. Tinabot is an open-source alternative aiming for the same experience in pure Python:
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://github.com/openai/codex) are the best local AI agent experiences today, but they only have terminal interfaces — you can't use them away from your computer. Tinabot was built to **add an IM interface** so you can remotely control your Agent via Telegram from anywhere.
 
+On top of that, Tinabot implements a complete agent experience in pure Python:
+
+- **Telegram remote control** — Run agent tasks, schedules, and voice commands from your phone, anytime, anywhere
 - **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI and Telegram
 - **Transparent token costs** — Each interaction shows input/output tokens and cost estimate (`↑5.2k ⚡40k ↓1.1k · $0.0534`)
 - **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI
-- **Reuse existing skills** — Compatible with Claude Code / Codex / OpenClaw `SKILL.md` skill format, reuses `~/.agents/skills/` directly
+- **Reuse existing skills** — Compatible with Claude Code / Codex / [OpenClaw](https://github.com/nicepkg/openclaw) `SKILL.md` skill format, reuses `~/.agents/skills/` directly
 - **Multi-model freedom** — Same tools and skills across Claude Opus, GPT-4o, o3, Gemini, Grok — switch in config
 - **ChatGPT subscription support** — OAuth login (`tina login openai`) uses your ChatGPT Plus/Pro subscription directly, no separate API key needed
-- **Telegram on the go** — Run agent tasks, schedules, and voice commands from your phone
 
-In short: **Claude Code experience + open source + multi-model + Telegram mobile**.
+In short: **Telegram remote control for Claude Code / Codex + multi-model support**.
 
 Supports multiple model backends: **Claude** (via Agent SDK), **OpenAI** (API key or ChatGPT OAuth login), **Gemini**, **Grok**.
 
