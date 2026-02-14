@@ -466,7 +466,11 @@ class TelegramBot:
             return
 
         task = self.memory.get_task(task_id)
-        if not task or not task.session_id:
+        if not task:
+            await update.message.reply_text("No session to compress")
+            return
+        # Claude needs session_id; non-Claude needs message history
+        if self.agent.config.is_claude and not task.session_id:
             await update.message.reply_text("No session to compress")
             return
 

@@ -196,7 +196,7 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
         task = tina.memory.get_active_task()
         if not task:
             console.print("No active task", style="yellow")
-        elif not task.session_id:
+        elif tina.agent.config.is_claude and not task.session_id:
             console.print("No session to compress", style="yellow")
         else:
             console.print("Compressing...", style="dim")
@@ -439,6 +439,79 @@ def task_export(
         console.print(f"Exported to {output}", style="green")
     else:
         console.print(history)
+
+
+login_cli = typer.Typer(help="Manage provider authentication")
+app_cli.add_typer(login_cli, name="login")
+
+
+@login_cli.command("openai")
+def login_openai():
+    """Login to OpenAI via OAuth (ChatGPT account)."""
+    from tinabot.openai_auth import OpenAIAuth
+
+    auth = OpenAIAuth()
+    if auth.is_logged_in:
+        console.print(
+            f"Already logged in (account: {auth.account_id or 'unknown'}). "
+            "Use 'tina login logout' first to re-authenticate.",
+            style="yellow",
+        )
+        raise typer.Exit(0)
+
+    success = auth.login()
+    if not success:
+        raise typer.Exit(1)
+
+
+@login_cli.command("status")
+def login_status():
+    """Show current authentication state."""
+    config = Config.load()
+    provider = config.agent.provider
+
+    console.print(f"Provider: {provider}", style="bold")
+
+    if config.agent.api_key:
+        key = config.agent.api_key
+        masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+        console.print(f"Auth: API key ({masked})", style="green")
+        return
+
+    if provider == "openai":
+        from tinabot.openai_auth import OpenAIAuth
+
+        auth = OpenAIAuth()
+        if auth.is_logged_in:
+            console.print(
+                f"Auth: OAuth (ChatGPT login, account: {auth.account_id or 'unknown'})",
+                style="green",
+            )
+        else:
+            console.print(
+                "Auth: Not configured. Run 'tina login openai' or set api_key in config.",
+                style="yellow",
+            )
+    elif provider == "claude":
+        console.print("Auth: Claude SDK (uses 'claude login' session)", style="green")
+    else:
+        console.print(
+            "Auth: Not configured. Set api_key in ~/.tinabot/config.json",
+            style="yellow",
+        )
+
+
+@login_cli.command("logout")
+def login_logout():
+    """Clear stored OAuth tokens."""
+    from tinabot.openai_auth import OpenAIAuth
+
+    auth = OpenAIAuth()
+    if not auth.is_logged_in:
+        console.print("Not logged in.", style="dim")
+        return
+    auth.logout()
+    console.print("Logged out. OAuth tokens cleared.", style="green")
 
 
 user_cli = typer.Typer(help="Manage Telegram allowed users")

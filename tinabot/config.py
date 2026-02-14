@@ -13,16 +13,33 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AgentConfig(BaseModel):
     """Agent execution settings."""
 
+    provider: str = "claude"  # "claude", "openai", "gemini", "grok"
     model: str = "claude-opus-4-6"
     max_thinking_tokens: int = 10000
     permission_mode: str = "acceptEdits"
     cwd: str = str(Path.home() / ".tinabot" / "workspace")
     api_key: str = ""  # ANTHROPIC_API_KEY, optional (falls back to claude login)
+    base_url: str = ""  # Custom API endpoint (auto-resolved from provider if empty)
+    max_tokens: int = 16384  # Max output tokens for OpenAI-compatible providers
     timeout_seconds: int = 300  # Max time per agent call (0 = no limit)
     allowed_tools: list[str] = Field(default_factory=lambda: [
         "Read", "Write", "Edit", "Bash", "Glob", "Grep",
         "WebSearch", "WebFetch", "Task",
     ])
+
+    def resolved_base_url(self) -> str:
+        """Return the API base URL, auto-resolved from provider if not set."""
+        if self.base_url:
+            return self.base_url
+        return {
+            "openai": "https://api.openai.com/v1",
+            "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "grok": "https://api.x.ai/v1",
+        }.get(self.provider, "")
+
+    @property
+    def is_claude(self) -> bool:
+        return self.provider == "claude"
 
 
 class TelegramConfig(BaseModel):

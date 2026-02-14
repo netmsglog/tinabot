@@ -20,6 +20,8 @@ dependencies = [
     "typer>=0.9",
     "croniter>=1.0",
     "groq>=0.9",
+    "openai>=1.50",
+    "httpx>=0.24",
 ]
 
 [project.scripts]

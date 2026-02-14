@@ -1,4 +1,4 @@
-"""Core agent wrapping claude-agent-sdk for execution."""
+"""Core agent wrapping claude-agent-sdk (Claude) and openai SDK (others)."""
 
 from __future__ import annotations
 
@@ -9,17 +9,6 @@ from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from loguru import logger
-
-from claude_agent_sdk import (
-    query,
-    ClaudeAgentOptions,
-    AssistantMessage,
-    SystemMessage,
-    ResultMessage,
-    TextBlock,
-    ThinkingBlock,
-    ToolUseBlock,
-)
 
 from tinabot.config import AgentConfig
 from tinabot.memory import Task, TaskMemory
@@ -115,6 +104,20 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-haiku-4": (1.0, 5.0),
 }
 
+MODEL_PRICING_OPENAI: dict[str, tuple[float, float]] = {
+    # model -> (input_$/MTok, output_$/MTok)
+    "gpt-4o": (2.5, 10.0),
+    "gpt-4o-mini": (0.15, 0.6),
+    "gpt-4.1": (2.0, 8.0),
+    "o3": (2.0, 8.0),
+    "o4-mini": (1.1, 4.4),
+    "gemini-2.5-pro": (1.25, 10.0),
+    "gemini-2.5-flash": (0.15, 0.6),
+    "gemini-2.0-flash": (0.1, 0.4),
+    "grok-3": (3.0, 15.0),
+    "grok-3-mini": (0.3, 0.5),
+}
+
 
 @dataclass
 class AgentResponse:
@@ -133,12 +136,18 @@ class AgentResponse:
 
 
 class TinaAgent:
-    """Wraps claude-agent-sdk query() with skills and memory integration.
+    """Multi-provider agent with skills and memory integration.
 
-    Session management:
+    Claude: uses claude-agent-sdk with full agent capabilities.
+    OpenAI/Gemini/Grok: uses openai SDK with our own tool-calling loop.
+
+    Session management (Claude):
     - Task has session_id and no summary -> resume session (SDK restores context)
     - Task has summary (was compressed) -> fresh session with summary in system_prompt
     - New task -> fresh session, capture session_id from init message
+
+    Session management (non-Claude):
+    - Message history stored per-task via MessageStore
     """
 
     def __init__(
@@ -150,6 +159,39 @@ class TinaAgent:
         self.config = config
         self.skills = skills_loader
         self.memory = task_memory
+
+        # Lazy-init for non-Claude providers
+        self._openai_agent = None
+        self._message_store = None
+        self._openai_auth = None  # OAuth for ChatGPT backend
+        self._use_codex = False   # True when using OAuth Responses API
+
+        if not config.is_claude:
+            from tinabot.message_store import MessageStore
+            from tinabot.openai_agent import OpenAIAgent
+
+            self._message_store = MessageStore(
+                Path(self.memory.data_dir)
+            )
+
+            if config.provider == "openai" and not config.api_key:
+                # No API key — try OAuth tokens
+                from tinabot.openai_auth import OpenAIAuth
+
+                self._openai_auth = OpenAIAuth()
+                if self._openai_auth.is_logged_in:
+                    self._use_codex = True
+                    self._openai_agent = OpenAIAgent(
+                        config, self._message_store, auth=self._openai_auth
+                    )
+                else:
+                    logger.warning(
+                        "OpenAI provider with no api_key and no OAuth tokens. "
+                        "Run: tina login openai"
+                    )
+                    self._openai_agent = OpenAIAgent(config, self._message_store)
+            else:
+                self._openai_agent = OpenAIAgent(config, self._message_store)
 
     def _build_system_prompt(
         self, task: Task, chat_id: int | None = None
@@ -199,8 +241,9 @@ class TinaAgent:
         task: Task,
         chat_id: int | None = None,
         no_thinking: bool = False,
-    ) -> ClaudeAgentOptions:
-        """Build SDK options for a query."""
+    ):
+        """Build SDK options for a Claude query."""
+        from claude_agent_sdk import ClaudeAgentOptions
         # Merge skill-provided tools with config tools
         all_tools = list(self.config.allowed_tools)
         skill_tools = self.skills.get_all_allowed_tools()
@@ -312,6 +355,18 @@ class TinaAgent:
         if task is None:
             task = self.memory.create_task(message[:80])
 
+        # Route non-Claude providers to OpenAI agent
+        if not self.config.is_claude:
+            return await self._process_openai(
+                message=message,
+                task=task,
+                on_text=on_text,
+                on_thinking=on_thinking,
+                on_tool=on_tool,
+                chat_id=chat_id,
+                images=images,
+            )
+
         options = self._build_options(task, chat_id=chat_id, no_thinking=no_thinking)
         logger.info(
             f"process task={task.id} session={task.session_id} "
@@ -326,6 +381,16 @@ class TinaAgent:
         prompt: str | AsyncIterator[dict[str, Any]] = message
         if images:
             prompt = self._make_multimodal_prompt(message, images)
+
+        from claude_agent_sdk import (
+            query,
+            AssistantMessage,
+            SystemMessage,
+            ResultMessage,
+            TextBlock,
+            ThinkingBlock,
+            ToolUseBlock,
+        )
 
         timeout = self.config.timeout_seconds or None
         try:
@@ -414,16 +479,113 @@ class TinaAgent:
 
         return response
 
-    async def _compress_task(self, task: Task):
-        """Compress a task by asking the agent (via resumed session) to summarize.
+    def _estimate_cost_openai(self, response: AgentResponse) -> float:
+        """Estimate cost for non-Claude models."""
+        in_price, out_price = 2.5, 10.0  # default to gpt-4o pricing
+        model = self.config.model
+        for name, (ip, op) in MODEL_PRICING_OPENAI.items():
+            if model == name or model.startswith(name):
+                in_price, out_price = ip, op
+                break
+        return (
+            response.input_tokens * in_price
+            + response.output_tokens * out_price
+        ) / 1_000_000
 
-        IMPORTANT: This modifies the session (adds the compression prompt/response
-        to the conversation history), so it should only be called when we intend
-        to discard the session afterward (save_summary clears session_id).
+    async def _process_openai(
+        self,
+        message: str,
+        task: Task,
+        on_text: OnText | None = None,
+        on_thinking: OnThinking | None = None,
+        on_tool: OnTool | None = None,
+        chat_id: int | None = None,
+        images: list[ImageInput] | None = None,
+    ) -> AgentResponse:
+        """Process a message via OpenAI-compatible provider."""
+        system_prompt = self._build_system_prompt(task, chat_id=chat_id)
 
-        Auto-compression is disabled — this is only called via force_compress
-        (i.e. user's /compress command).
-        """
+        mode = "codex" if self._use_codex else "api"
+        logger.info(
+            f"process_openai task={task.id} mode={mode} "
+            f"provider={self.config.provider} model={self.config.model} "
+            f"turns={task.turn_count}"
+        )
+
+        response = AgentResponse()
+
+        # Convert ImageInput objects to dicts for the OpenAI agent
+        img_dicts = None
+        if images:
+            img_dicts = [
+                {"data": img.data, "media_type": img.media_type}
+                for img in images
+            ]
+
+        timeout = self.config.timeout_seconds or None
+        try:
+            async with asyncio.timeout(timeout):
+                if self._use_codex:
+                    # OAuth path: use Responses API via ChatGPT backend
+                    result = await self._openai_agent.run_codex(
+                        task_id=task.id,
+                        user_message=message,
+                        system_prompt=system_prompt,
+                        on_text=on_text,
+                        on_thinking=on_thinking,
+                        on_tool=on_tool,
+                    )
+                else:
+                    # Standard API key path
+                    result = await self._openai_agent.run(
+                        task_id=task.id,
+                        user_message=message,
+                        system_prompt=system_prompt,
+                        on_text=on_text,
+                        on_thinking=on_thinking,
+                        on_tool=on_tool,
+                        images=img_dicts,
+                    )
+
+            response.text = result.text
+            response.input_tokens = result.input_tokens
+            response.output_tokens = result.output_tokens
+            response.num_turns = result.num_turns
+            response.tool_uses = result.tool_uses
+
+            if self._use_codex:
+                # ChatGPT subscription — no per-token cost
+                response.cost_usd = 0.0
+            else:
+                response.cost_usd = self._estimate_cost_openai(response)
+
+        except TimeoutError:
+            logger.warning(f"Agent timed out after {timeout}s for task {task.id}")
+            response.text = (
+                f"Request timed out after {timeout}s. "
+                "You can retry or send a simpler request."
+            )
+        except Exception as e:
+            logger.error(f"OpenAI agent error: {e}")
+            response.text = f"Error: {e}"
+
+        # Save last response
+        if response.text:
+            self.memory.save_last_response(task.id, response.text)
+
+        self.memory.increment_turns(task.id)
+
+        return response
+
+    async def _compress_task_claude(self, task: Task):
+        """Compress a Claude task by asking the agent (via resumed session) to summarize."""
+        from claude_agent_sdk import (
+            query,
+            ClaudeAgentOptions,
+            AssistantMessage,
+            TextBlock,
+        )
+
         if not task.session_id:
             logger.warning(f"Cannot compress task {task.id}: no session_id")
             return
@@ -465,9 +627,38 @@ class TinaAgent:
         except Exception as e:
             logger.error(f"Compression failed for task {task.id}: {e}")
 
+    async def _compress_task_openai(self, task: Task):
+        """Compress a non-Claude task by asking the model to summarize message history."""
+        logger.info(f"Compressing task {task.id} ({task.turn_count} turns)")
+
+        try:
+            result = await self._openai_agent.run(
+                task_id=task.id,
+                user_message=COMPRESSION_PROMPT,
+                system_prompt="You are a helpful assistant. Summarize the conversation.",
+            )
+
+            if result.text:
+                self.memory.save_summary(task.id, result.text)
+                # Clear message history since we've summarized
+                self._message_store.clear(task.id)
+                logger.info(f"Task {task.id} compressed ({len(result.text)} chars)")
+            else:
+                logger.warning(f"Compression returned empty for task {task.id}")
+
+        except Exception as e:
+            logger.error(f"Compression failed for task {task.id}: {e}")
+
     async def force_compress(self, task: Task) -> str | None:
         """Force compress a task regardless of turn count."""
-        if not task.session_id:
-            return None
-        await self._compress_task(task)
+        if self.config.is_claude:
+            if not task.session_id:
+                return None
+            await self._compress_task_claude(task)
+        else:
+            # Non-Claude: compress if we have message history
+            msgs = self._message_store.get_messages(task.id)
+            if len(msgs) <= 1:  # Only system message or empty
+                return None
+            await self._compress_task_openai(task)
         return self.memory.get_summary(task.id)
