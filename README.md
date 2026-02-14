@@ -4,7 +4,7 @@
 
 ## Why Tinabot?
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 是目前体验最好的本地 AI Agent，但它们只有终端界面 — 不在电脑前就用不了。Tinabot 的初衷是给它们**加一个 IM 界面**，让你通过 Telegram 随时远程操控家里/办公室的 Agent。
+作为 Claude Code 和 Codex 的重度用户，在使用 [OpenClaw](https://github.com/nicepkg/openclaw) 过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么的情况。Tinabot 的初衷是给它们**加一个 IM 界面**，让你通过 Telegram 随时远程操控家里/办公室电脑上的 Agent。
 
 在此基础上，Tinabot 用纯 Python 实现了完整的 Agent 体验：
 
@@ -12,26 +12,20 @@
 - **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI 和 Telegram 中，清楚知道 Agent 在做什么、做了多久
 - **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
 - **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住
-- **复用现有技能库** — 兼容 Claude Code / Codex / [OpenClaw](https://github.com/nicepkg/openclaw) 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
+- **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
 - **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3、Gemini、Grok，随时在 config 里切换
 - **ChatGPT 订阅直接用** — 通过 OAuth 登录（`tina login openai`）直接使用 ChatGPT Plus/Pro 订阅额度，无需额外购买 API key
 
 简单来说：**给 Claude Code / Codex 加上 Telegram 遥控 + 多模型支持**。
 
-支持多种模型后端：**Claude**（通过 Agent SDK）、**OpenAI**（API key 或 ChatGPT OAuth 登录）、**Gemini**、**Grok**。
-
 ## 特性
 
-- **多模型支持** — Claude Opus/Sonnet、GPT-4o/o3/o4-mini（API key 或 ChatGPT Plus/Pro 订阅 OAuth）、Gemini、Grok
-- **Claude 深度思考** — 使用 Claude 的 extended thinking 能力进行深层推理
+- **多模型** — Claude Opus/Sonnet、GPT-4o/o3/o4-mini、Gemini、Grok，通过 API key 或 ChatGPT OAuth 登录
 - **双接口** — 交互式 CLI（rich markdown 渲染）+ Telegram 机器人
-- **Telegram 实时进度** — Agent 工作时，状态消息实时更新，展示思考状态和每一步工具调用，完成后替换为最终回复
-- **按任务记忆** — 每个对话是独立的"任务"，跨消息保持上下文
-- **自动压缩** — 任务超过设定轮次后，自动总结对话并开启新 session，控制 token 开销
-- **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载技能定义。小技能内联到 system prompt，大技能按需加载
-- **定时任务** — 用自然语言创建定时任务（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并将结果发送到 Telegram
-- **语音消息** — 在 Telegram 发送语音，通过 Groq Whisper API 自动转写为文字后交给 Agent 处理
-- **图片消息** — 发送图片附带指令，图片保存到本地并以多模态内容+文件路径发送给 Agent
+- **按任务记忆** — 每个对话是独立的"任务"，跨消息保持上下文，超过设定轮次自动压缩
+- **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载，小技能内联 system prompt，大技能按需加载
+- **定时任务** — 用自然语言创建（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并发送到 Telegram
+- **语音 & 图片** — Telegram 语音消息自动转写（Groq Whisper），图片多模态识别+本地文件操作
 - **完整工具集** — Read、Write、Edit、Bash、Glob、Grep、WebSearch、WebFetch、Task
 
 ## 快速开始
@@ -324,7 +318,7 @@ A local AI agent powered by [Claude Agent SDK](https://github.com/anthropics/cla
 
 ## Why Tinabot?
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://github.com/openai/codex) are the best local AI agent experiences today, but they only have terminal interfaces — you can't use them away from your computer. Tinabot was built to **add an IM interface** so you can remotely control your Agent via Telegram from anywhere.
+As a heavy user of Claude Code and Codex, I often ran into long-running tasks with [OpenClaw](https://github.com/nicepkg/openclaw) where token costs piled up with no visibility into what the agent was actually doing. Tinabot was built to **add an IM interface** so you can remotely control your Agent via Telegram from anywhere.
 
 On top of that, Tinabot implements a complete agent experience in pure Python:
 
@@ -332,26 +326,20 @@ On top of that, Tinabot implements a complete agent experience in pure Python:
 - **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI and Telegram
 - **Transparent token costs** — Each interaction shows input/output tokens and cost estimate (`↑5.2k ⚡40k ↓1.1k · $0.0534`)
 - **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI
-- **Reuse existing skills** — Compatible with Claude Code / Codex / [OpenClaw](https://github.com/nicepkg/openclaw) `SKILL.md` skill format, reuses `~/.agents/skills/` directly
+- **Reuse existing skills** — Compatible with Claude Code / Codex / OpenClaw `SKILL.md` skill format, reuses `~/.agents/skills/` directly
 - **Multi-model freedom** — Same tools and skills across Claude Opus, GPT-4o, o3, Gemini, Grok — switch in config
 - **ChatGPT subscription support** — OAuth login (`tina login openai`) uses your ChatGPT Plus/Pro subscription directly, no separate API key needed
 
 In short: **Telegram remote control for Claude Code / Codex + multi-model support**.
 
-Supports multiple model backends: **Claude** (via Agent SDK), **OpenAI** (API key or ChatGPT OAuth login), **Gemini**, **Grok**.
-
 ## Features
 
-- **Multi-model support** — Claude Opus/Sonnet, GPT-4o/o3/o4-mini (API key or ChatGPT Plus/Pro subscription OAuth), Gemini, Grok
-- **Claude Extended Thinking** — Uses Claude's thinking capability for deeper reasoning
+- **Multi-model** — Claude Opus/Sonnet, GPT-4o/o3/o4-mini, Gemini, Grok, via API key or ChatGPT OAuth
 - **Dual Interface** — Interactive CLI (rich markdown rendering) + Telegram bot
-- **Live Progress on Telegram** — Real-time status updates showing thinking state and tool calls
-- **Per-Task Memory** — Each conversation is a "task" with context maintained across messages
-- **Auto-Compression** — Summarizes conversations when they exceed a turn limit
-- **Skills System** — Loads skill definitions from `~/.agents/skills/*/SKILL.md`
-- **Scheduled Tasks** — Create recurring tasks from natural language
-- **Voice Messages** — Automatic transcription via Groq Whisper API
-- **Photo Messages** — Multimodal image processing with local file access
+- **Per-Task Memory** — Each conversation is a "task" with cross-message context, auto-compressed when turns exceed limit
+- **Skills System** — Loads from `~/.agents/skills/*/SKILL.md`, small skills inlined, large skills loaded on demand
+- **Scheduled Tasks** — Create from natural language (e.g. "search reddit daily at 9am"), cron-based background execution
+- **Voice & Photos** — Telegram voice auto-transcription (Groq Whisper), multimodal image recognition + local file access
 - **Full Tool Access** — Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, Task
 
 ## Quick Start
