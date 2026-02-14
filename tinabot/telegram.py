@@ -344,6 +344,27 @@ class TelegramBot:
             await self._app.shutdown()
             self._app = None
 
+    async def _send_one(self, chat_id: int, text: str, parse_mode: str | None):
+        """Send a single message with RetryAfter handling."""
+        from telegram.error import RetryAfter
+
+        for attempt in range(3):
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id, text=text, parse_mode=parse_mode
+                )
+                return True
+            except RetryAfter as e:
+                wait = e.retry_after + 1
+                logger.warning(f"Flood control, waiting {wait}s (attempt {attempt+1})")
+                await asyncio.sleep(wait)
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                logger.warning(f"Send failed (attempt {attempt+1}): {e}")
+                await asyncio.sleep(1)
+        return False
+
     async def _send(self, chat_id: int, text: str, parse_html: bool = True):
         """Send a message, splitting if needed."""
         if not self._app:
@@ -352,19 +373,21 @@ class TelegramBot:
         self._stop_typing(chat_id)
 
         chunks = _split_message(text)
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            # Delay between chunks to avoid flood control
+            if i > 0:
+                await asyncio.sleep(0.5)
+
             if parse_html:
                 html = markdown_to_telegram_html(chunk)
                 try:
-                    await self._app.bot.send_message(
-                        chat_id=chat_id, text=html, parse_mode="HTML"
-                    )
+                    await self._send_one(chat_id, html, parse_mode="HTML")
                     continue
                 except Exception as e:
                     logger.warning(f"HTML send failed, falling back: {e}")
 
             # Fallback to plain text
-            await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+            await self._send_one(chat_id, chunk, parse_mode=None)
 
     async def send_message(self, chat_id: int, text: str):
         """Public interface for sending messages (used by Scheduler)."""

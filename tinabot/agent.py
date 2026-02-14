@@ -259,7 +259,19 @@ class TinaAgent:
                 self._openai_agent = OpenAIAgent(config, self._message_store)
 
     def reinit(self, config: AgentConfig):
-        """Reinitialize agent with new config (e.g. after model switch)."""
+        """Reinitialize agent with new config (e.g. after model switch).
+
+        Clears message history for all tasks because different models have
+        incompatible tool-call formats and context.
+        """
+        # Clear old message history before switching
+        if self._message_store:
+            from tinabot.message_store import MessageStore
+            # Clear all cached task histories
+            for task in self.memory.list_tasks():
+                self._message_store.clear(task.id)
+            logger.info("Cleared message history for model switch")
+
         self.config = config
         self._openai_agent = None
         self._message_store = None
