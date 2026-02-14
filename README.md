@@ -1,28 +1,23 @@
 # Tinabot
 
-基于 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) 的本地 AI Agent，支持 CLI 和 Telegram 双接口。
+基于 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) 的本地 AI Agent，精简代码量，平替openclaw功能，接近claude code/codex的使用体验，支持 CLI 和 Telegram 双接口。
 
 ## Why Tinabot?
 
-作为 Claude Code 和 Codex 的重度用户，在使用 [OpenClaw](https://github.com/nicepkg/openclaw) 过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么的情况。Tinabot 的初衷是给它们**加一个 IM 界面**，让你通过 Telegram 随时远程操控家里/办公室电脑上的 Agent。
+作为 Claude Code 和 Codex 的重度用户，在使用openclaw过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么的情况。Tinabot 的初衷是做一个代码干净、可定制的openclaw平替，给cc/codex**加一个 IM 界面**，通过 Telegram 随时远程操控。
 
-在此基础上，Tinabot 用纯 Python 实现了完整的 Agent 体验：
-
-- **Telegram 远程操控** — 不在电脑前也能通过 Telegram 让 Agent 执行任务、定时任务、语音指令，随身携带你的 AI Agent
 - **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI 和 Telegram 中，清楚知道 Agent 在做什么、做了多久
 - **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
 - **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住
 - **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
 - **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3 等，CLI 命令或 REPL 内一键切换（`tina model set o3` 或 `/model o3`）
 - **OpenAI 兼容** — 除原生 OpenAI 外，任何兼容 OpenAI 接口的模型（DeepSeek、Mistral、Ollama、vLLM 等）都可通过 `base_url` 接入
-- **ChatGPT 订阅直接用** — 通过 OAuth 登录（`tina login openai`）直接使用 ChatGPT Plus/Pro 订阅额度，无需额外购买 API key
+- **Claude / ChatGPT 订阅直接用** — 通过 OAuth 登录（Claude Code 内 `/login` 或 `tina login openai`）直接使用 Claude/ChatGPT 订阅额度，无需额外购买 API key
 
 简单来说：**给 Claude Code / Codex 加上 Telegram 遥控 + 多模型支持**。
 
 ## 特性
 
-- **多模型** — Claude Opus/Sonnet、GPT-4o/o3/o4-mini，通过 API key 或 ChatGPT OAuth 登录；支持任何 OpenAI 兼容 API
-- **双接口** — 交互式 CLI（rich markdown 渲染）+ Telegram 机器人
 - **按任务记忆** — 每个对话是独立的"任务"，跨消息保持上下文，超过设定轮次自动压缩
 - **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载，小技能内联 system prompt，大技能按需加载
 - **定时任务** — 用自然语言创建（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并发送到 Telegram
@@ -48,7 +43,9 @@ Tinabot 支持多种认证方式，按 provider 选择：
 
 ```bash
 # 方式 A：通过 Claude Code CLI OAuth 登录
-claude login
+# 启动 claude，然后在 REPL 内输入 /login
+claude
+# > /login
 
 # 方式 B：API key
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -363,9 +360,12 @@ pip install -e .
 ### Claude (default)
 
 ```bash
-claude login                        # OAuth login via Claude Code CLI
-# or
-export ANTHROPIC_API_KEY=sk-ant-... # API key
+# Option A: OAuth via Claude Code CLI (run claude, then /login inside REPL)
+claude
+# > /login
+
+# Option B: API key
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### OpenAI — ChatGPT OAuth (recommended)
