@@ -13,14 +13,15 @@
 - **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
 - **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住
 - **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
-- **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3、Gemini、Grok，随时在 config 里切换
+- **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3 等，CLI 命令或 REPL 内一键切换（`tina model set o3` 或 `/model o3`）
+- **OpenAI 兼容** — 除原生 OpenAI 外，任何兼容 OpenAI 接口的模型（DeepSeek、Mistral、Ollama、vLLM 等）都可通过 `base_url` 接入
 - **ChatGPT 订阅直接用** — 通过 OAuth 登录（`tina login openai`）直接使用 ChatGPT Plus/Pro 订阅额度，无需额外购买 API key
 
 简单来说：**给 Claude Code / Codex 加上 Telegram 遥控 + 多模型支持**。
 
 ## 特性
 
-- **多模型** — Claude Opus/Sonnet、GPT-4o/o3/o4-mini、Gemini、Grok，通过 API key 或 ChatGPT OAuth 登录
+- **多模型** — Claude Opus/Sonnet、GPT-4o/o3/o4-mini，通过 API key 或 ChatGPT OAuth 登录；支持任何 OpenAI 兼容 API
 - **双接口** — 交互式 CLI（rich markdown 渲染）+ Telegram 机器人
 - **按任务记忆** — 每个对话是独立的"任务"，跨消息保持上下文，超过设定轮次自动压缩
 - **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载，小技能内联 system prompt，大技能按需加载
@@ -100,27 +101,25 @@ tina login logout
 }
 ```
 
-### Gemini / Grok
+### OpenAI 兼容模型（DeepSeek、Mistral、Ollama 等）
 
-```bash
-# Gemini
+任何提供 OpenAI 兼容接口的模型都可以使用，只需设置 `base_url` 指向对应端点：
+
+```json
 {
   "agent": {
-    "provider": "gemini",
-    "api_key": "your-gemini-key",
-    "model": "gemini-2.5-pro"
-  }
-}
-
-# Grok
-{
-  "agent": {
-    "provider": "grok",
-    "api_key": "your-grok-key",
-    "model": "grok-3"
+    "provider": "openai",
+    "api_key": "your-key",
+    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com/v1"
   }
 }
 ```
+
+更多示例：
+- Ollama 本地：`"base_url": "http://localhost:11434/v1"`
+- vLLM：`"base_url": "http://localhost:8000/v1"`
+- Azure OpenAI：`"base_url": "https://your-resource.openai.azure.com/openai/deployments/your-deployment/"`
 
 ## 配置
 
@@ -157,10 +156,10 @@ tina login logout
 
 | 字段 | 说明 |
 |---|---|
-| `provider` | `claude`、`openai`、`gemini`、`grok` |
+| `provider` | `claude` 或 `openai`（OpenAI 兼容模型也用 `openai`） |
 | `model` | 模型名称 |
-| `api_key` | API key（Claude/OpenAI/Gemini/Grok）。OpenAI 留空则使用 OAuth |
-| `base_url` | 自定义 API 端点（留空自动根据 provider 解析） |
+| `api_key` | API key（Claude 或 OpenAI）。OpenAI 留空则使用 OAuth |
+| `base_url` | 自定义 API 端点，用于 OpenAI 兼容模型（留空默认 OpenAI 官方） |
 | `max_tokens` | 非 Claude 模型的最大输出 token 数 |
 | `timeout_seconds` | 单次 Agent 调用超时（0=无限制） |
 | `permission_mode` | Claude 权限模式：`plan`、`acceptEdits`、`bypassPermissions` |
@@ -173,6 +172,10 @@ tina chat           # 同上
 tina serve          # 启动 Telegram 机器人
 tina tasks          # 列出所有任务
 tina skills         # 列出已加载的技能
+
+# 模型管理
+tina model list     # 列出所有已知模型和定价
+tina model set o3   # 切换模型（自动检测 provider，写入 config）
 
 # 认证管理
 tina login openai   # OpenAI OAuth 登录
@@ -206,6 +209,8 @@ REPL 命令：
 | `/delete <id>` | 删除任务 |
 | `/export [id]` | 导出对话历史 |
 | `/skills` | 列出已加载技能 |
+| `/models` | 列出可用模型和定价 |
+| `/model [名称]` | 查看或切换当前模型（会话内即时生效） |
 | `/help` | 显示帮助 |
 | `/exit` | 退出 |
 
@@ -327,14 +332,15 @@ On top of that, Tinabot implements a complete agent experience in pure Python:
 - **Transparent token costs** — Each interaction shows input/output tokens and cost estimate (`↑5.2k ⚡40k ↓1.1k · $0.0534`)
 - **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI
 - **Reuse existing skills** — Compatible with Claude Code / Codex / OpenClaw `SKILL.md` skill format, reuses `~/.agents/skills/` directly
-- **Multi-model freedom** — Same tools and skills across Claude Opus, GPT-4o, o3, Gemini, Grok — switch in config
+- **Multi-model freedom** — Same tools and skills across Claude Opus, GPT-4o, o3, etc. — switch with `tina model set o3` or `/model o3` in REPL
+- **OpenAI-compatible** — Beyond native OpenAI, any OpenAI-compatible API (DeepSeek, Mistral, Ollama, vLLM, etc.) works via `base_url`
 - **ChatGPT subscription support** — OAuth login (`tina login openai`) uses your ChatGPT Plus/Pro subscription directly, no separate API key needed
 
 In short: **Telegram remote control for Claude Code / Codex + multi-model support**.
 
 ## Features
 
-- **Multi-model** — Claude Opus/Sonnet, GPT-4o/o3/o4-mini, Gemini, Grok, via API key or ChatGPT OAuth
+- **Multi-model** — Claude Opus/Sonnet, GPT-4o/o3/o4-mini, via API key or ChatGPT OAuth; any OpenAI-compatible API supported
 - **Dual Interface** — Interactive CLI (rich markdown rendering) + Telegram bot
 - **Per-Task Memory** — Each conversation is a "task" with cross-message context, auto-compressed when turns exceed limit
 - **Skills System** — Loads from `~/.agents/skills/*/SKILL.md`, small skills inlined, large skills loaded on demand
@@ -401,28 +407,35 @@ tina login logout   # Clear OAuth tokens
 }
 ```
 
-### Gemini / Grok
+### OpenAI-Compatible Models (DeepSeek, Mistral, Ollama, etc.)
+
+Any model with an OpenAI-compatible API works — just set `base_url`:
 
 ```json
 {
   "agent": {
-    "provider": "gemini",
+    "provider": "openai",
     "api_key": "your-key",
-    "model": "gemini-2.5-pro"
+    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com/v1"
   }
 }
 ```
 
+More examples: Ollama local `"http://localhost:11434/v1"`, vLLM `"http://localhost:8000/v1"`.
+
 ## CLI Usage
 
 ```
-tina                # Interactive REPL (default)
-tina serve          # Start Telegram bot
-tina login openai   # OpenAI OAuth login
-tina login status   # Show auth state
-tina login logout   # Clear OAuth tokens
-tina tasks          # List all tasks
-tina skills         # List loaded skills
+tina                     # Interactive REPL (default)
+tina serve               # Start Telegram bot
+tina model list          # List known models with pricing
+tina model set o3        # Switch model (auto-detects provider, persists to config)
+tina login openai        # OpenAI OAuth login
+tina login status        # Show auth state
+tina login logout        # Clear OAuth tokens
+tina tasks               # List all tasks
+tina skills              # List loaded skills
 tina user list/add/del   # Manage Telegram allowlist
 tina schedule list/add/del   # Manage scheduled tasks
 tina task list/del/export    # Manage tasks

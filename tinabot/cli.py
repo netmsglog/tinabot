@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
-from tinabot.agent import AgentResponse
+from tinabot.agent import AgentResponse, get_known_models, infer_provider
 from tinabot.app import TinaApp
 from tinabot.config import Config
 from tinabot.memory import Task
@@ -109,14 +109,17 @@ async def _run_repl(tina: TinaApp):
     console.print(
         Panel(
             "[bold]Tina[/bold] - AI Agent\n"
-            "Type a message to chat. Commands: /new /tasks /resume /compress /skills /help /exit",
+            "Type a message to chat. Commands: /new /tasks /model /models /help /exit",
             border_style="blue",
         )
     )
 
     task = tina.memory.get_active_task()
+    model_info = f"{tina.config.agent.model} ({tina.config.agent.provider})"
     if task:
-        console.print(f"Active task: [{task.id}] {task.name}", style="dim")
+        console.print(f"Active task: [{task.id}] {task.name}  Model: {model_info}", style="dim")
+    else:
+        console.print(f"Model: {model_info}", style="dim")
 
     while True:
         try:
@@ -245,6 +248,22 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
             for s in skills:
                 console.print(f"  {s['name']}: {s['description']}", style="cyan")
 
+    elif command == "/models":
+        _print_model_list(tina.config.agent.model, tina.config.agent.provider)
+
+    elif command == "/model":
+        if not arg:
+            console.print(
+                f"Current model: {tina.config.agent.model} ({tina.config.agent.provider})",
+            )
+        else:
+            model, provider = _switch_model(arg)
+            # Update in-memory config and reinitialize agent
+            tina.config.agent.model = model
+            tina.config.agent.provider = provider
+            tina.agent.reinit(tina.config.agent)
+            console.print(f"Switched to {model} ({provider})", style="green")
+
     elif command == "/help":
         console.print(
             Panel(
@@ -255,6 +274,8 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
                 "/delete <id>    Delete a task\n"
                 "/export [id]    Export conversation history\n"
                 "/skills         List loaded skills\n"
+                "/models         List available models\n"
+                "/model [name]   Show or switch model\n"
                 "/help           Show this help\n"
                 "/exit           Quit",
                 title="Commands",
@@ -512,6 +533,83 @@ def login_logout():
         return
     auth.logout()
     console.print("Logged out. OAuth tokens cleared.", style="green")
+
+
+model_cli = typer.Typer(help="Manage model selection")
+app_cli.add_typer(model_cli, name="model")
+
+
+def _print_model_list(current_model: str, current_provider: str):
+    """Print all known models grouped by provider, marking current with *."""
+    models = get_known_models()
+    console.print(f"Current: {current_model} ({current_provider})\n")
+
+    # Group by provider
+    by_provider: dict[str, list[tuple[str, float, float]]] = {}
+    for name, (provider, inp, out) in models.items():
+        by_provider.setdefault(provider, []).append((name, inp, out))
+
+    for provider_key, label in (("claude", "Claude"), ("openai", "OpenAI")):
+        entries = by_provider.get(provider_key, [])
+        if not entries:
+            continue
+        console.print(f"{label}:", style="bold")
+        for name, inp, out in entries:
+            marker = "*" if name == current_model else " "
+            style = "green" if name == current_model else ""
+            console.print(
+                f"  {marker} {name:<30s}  ${inp:.2f} / ${out:.2f}",
+                style=style,
+            )
+        console.print()
+
+    console.print(
+        "Tip: Any OpenAI-compatible model works — set base_url in config for custom endpoints.",
+        style="dim",
+    )
+
+
+def _switch_model(model_name: str) -> tuple[str, str]:
+    """Validate and persist a model switch. Returns (model, provider)."""
+    provider = infer_provider(model_name)
+    models = get_known_models()
+
+    if model_name not in models:
+        if provider:
+            console.print(
+                f"Warning: Unknown model '{model_name}' — provider auto-detected as {provider}",
+                style="yellow",
+            )
+        else:
+            console.print(
+                f"Warning: Unknown model '{model_name}' — cannot infer provider, keeping current",
+                style="yellow",
+            )
+            # Load current provider as fallback
+            data = Config.load_raw()
+            provider = data.get("agent", {}).get("provider", "claude")
+
+    data = Config.load_raw()
+    data.setdefault("agent", {})["model"] = model_name
+    data["agent"]["provider"] = provider
+    Config.save_raw(data)
+    return model_name, provider
+
+
+@model_cli.command("list")
+def model_list():
+    """List all known models with pricing."""
+    config = Config.load()
+    _print_model_list(config.agent.model, config.agent.provider)
+
+
+@model_cli.command("set")
+def model_set(
+    model_name: str = typer.Argument(..., help="Model name to switch to"),
+):
+    """Switch the active model."""
+    model, provider = _switch_model(model_name)
+    console.print(f"Switched to {model} ({provider})", style="green")
 
 
 user_cli = typer.Typer(help="Manage Telegram allowed users")

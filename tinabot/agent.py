@@ -20,19 +20,28 @@ OnThinking = Callable[[str], Awaitable[None] | None]
 OnTool = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
 
-IDENTITY_PROMPT = """\
-You are Tina, a capable AI assistant. You help users accomplish tasks \
-using the tools available to you. Be direct, concise, and helpful.
+IDENTITY_PROMPT_BASE = """\
+You are Tina, a capable AI agent running on the user's local machine. \
+You have direct access to tools and MUST use them proactively to accomplish tasks. \
+Be direct, concise, and action-oriented.
+
+## Key Behaviors
+- **Be proactive**: Execute commands directly. Don't ask "would you like me to..." — just do it.
+- **Don't ask for confirmation** unless the action is destructive or irreversible.
+- **Error recovery**: If a command fails, try an alternative approach. Don't give up and ask the user.
+- **Respond in the user's language**: If the user writes in Chinese, respond in Chinese.
+- **Image analysis**: When you receive an image, analyze it directly from the visual content.
+- **Apple Notes**: Use `osascript -e 'tell application "Notes" to ...'` via Bash.
 
 When you have skills available, use them to guide your approach. \
 You can read skill files for detailed instructions when needed.
 """
 
-IDENTITY_PROMPT_OPENAI = """\
-You are Tina, a capable AI agent running on the user's local machine. \
-You have direct access to tools and MUST use them proactively to accomplish tasks. \
-Be direct, concise, and action-oriented.
+# Claude SDK handles tool descriptions and orchestration, so minimal prompt suffices.
+IDENTITY_PROMPT = IDENTITY_PROMPT_BASE
 
+# OpenAI-compatible models need explicit tool docs since we run our own tool loop.
+IDENTITY_PROMPT_OPENAI = IDENTITY_PROMPT_BASE + """
 ## Platform
 - Running on macOS (Darwin)
 - You can execute any shell command via the Bash tool
@@ -40,27 +49,14 @@ Be direct, concise, and action-oriented.
 
 ## Tools
 You have the following tools — USE THEM, don't ask the user to run commands manually:
-- **Bash**: Execute any shell command. This includes:
-  - Standard Unix commands (ls, cat, grep, curl, python3, etc.)
-  - macOS-specific: `osascript` for AppleScript (Apple Notes, Reminders, Finder, etc.)
-  - `open` to open files/URLs in default apps
-  - Package managers: pip, brew, npm, etc.
-  - Git operations
+- **Bash**: Execute any shell command (Unix commands, osascript, open, git, package managers)
 - **Read**: Read file contents with line numbers
 - **Write**: Write/overwrite files
-- **Glob**: Find files by pattern
+- **Edit**: Edit files with precise string replacements
+- **Glob**: Find files by pattern (e.g. "**/*.py")
 - **Grep**: Search file contents with regex
-- **WebFetch**: Fetch URL content
-
-## Key Behaviors
-- **Be proactive**: Execute commands directly. Don't ask "would you like me to..." — just do it.
-- **Don't ask for confirmation** unless the action is destructive or irreversible.
-- **Apple Notes**: Use `osascript -e 'tell application "Notes" to make new note ...'` via Bash. Don't ask about Shortcuts.
-- **Image analysis**: When you receive an image, analyze it directly from the visual content. Don't try to OCR it with external tools.
-- **Error recovery**: If a command fails, try an alternative approach. Don't give up and ask the user.
-- **Respond in the user's language**: If the user writes in Chinese, respond in Chinese.
-
-When you have skills available, use them to guide your approach.
+- **WebFetch**: Fetch and process URL content
+- **WebSearch**: Search the web for information
 """
 
 SCHEDULING_PROMPT_TEMPLATE = """\
@@ -144,14 +140,48 @@ MODEL_PRICING_OPENAI: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.5, 10.0),
     "gpt-4o-mini": (0.15, 0.6),
     "gpt-4.1": (2.0, 8.0),
+    "gpt-5.2": (0.0, 0.0),
     "o3": (2.0, 8.0),
     "o4-mini": (1.1, 4.4),
-    "gemini-2.5-pro": (1.25, 10.0),
-    "gemini-2.5-flash": (0.15, 0.6),
-    "gemini-2.0-flash": (0.1, 0.4),
-    "grok-3": (3.0, 15.0),
-    "grok-3-mini": (0.3, 0.5),
 }
+
+# Unified model registry: model -> (provider, input_$/MTok, output_$/MTok)
+KNOWN_MODELS: dict[str, tuple[str, float, float]] = {
+    # Claude
+    "claude-opus-4-6": ("claude", 5.0, 25.0),
+    "claude-sonnet-4-5-20250929": ("claude", 3.0, 15.0),
+    "claude-haiku-4-5-20251001": ("claude", 1.0, 5.0),
+    # OpenAI
+    "gpt-4o": ("openai", 2.5, 10.0),
+    "gpt-4o-mini": ("openai", 0.15, 0.6),
+    "gpt-4.1": ("openai", 2.0, 8.0),
+    "gpt-5.2": ("openai", 0.0, 0.0),
+    "o3": ("openai", 2.0, 8.0),
+    "o4-mini": ("openai", 1.1, 4.4),
+}
+
+
+def get_known_models() -> dict[str, tuple[str, float, float]]:
+    """Return the known models registry."""
+    return KNOWN_MODELS
+
+
+def infer_provider(model: str) -> str | None:
+    """Infer provider from model name. Returns None if unknown.
+
+    Only Claude and OpenAI are natively supported. Other OpenAI-compatible
+    providers (DeepSeek, Mistral, local LLMs, etc.) should use provider="openai"
+    with a custom base_url in config.
+    """
+    if model in KNOWN_MODELS:
+        return KNOWN_MODELS[model][0]
+    # Fallback heuristics
+    if model.startswith("claude-"):
+        return "claude"
+    if model.startswith(("gpt-", "o3", "o4", "o1")):
+        return "openai"
+    # Unknown models default to OpenAI-compatible
+    return "openai"
 
 
 @dataclass
@@ -211,6 +241,40 @@ class TinaAgent:
 
             if config.provider == "openai" and not config.api_key:
                 # No API key — try OAuth tokens
+                from tinabot.openai_auth import OpenAIAuth
+
+                self._openai_auth = OpenAIAuth()
+                if self._openai_auth.is_logged_in:
+                    self._use_codex = True
+                    self._openai_agent = OpenAIAgent(
+                        config, self._message_store, auth=self._openai_auth
+                    )
+                else:
+                    logger.warning(
+                        "OpenAI provider with no api_key and no OAuth tokens. "
+                        "Run: tina login openai"
+                    )
+                    self._openai_agent = OpenAIAgent(config, self._message_store)
+            else:
+                self._openai_agent = OpenAIAgent(config, self._message_store)
+
+    def reinit(self, config: AgentConfig):
+        """Reinitialize agent with new config (e.g. after model switch)."""
+        self.config = config
+        self._openai_agent = None
+        self._message_store = None
+        self._openai_auth = None
+        self._use_codex = False
+
+        if not config.is_claude:
+            from tinabot.message_store import MessageStore
+            from tinabot.openai_agent import OpenAIAgent
+
+            self._message_store = MessageStore(
+                Path(self.memory.data_dir)
+            )
+
+            if config.provider == "openai" and not config.api_key:
                 from tinabot.openai_auth import OpenAIAuth
 
                 self._openai_auth = OpenAIAuth()
