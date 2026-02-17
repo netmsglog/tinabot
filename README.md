@@ -1,20 +1,19 @@
 # Tinabot
 
-基于 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) 的本地 AI Agent，精简代码量，平替openclaw功能，接近claude code/codex的使用体验，支持 CLI 和 Telegram 双接口。
+基于 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) 的本地 AI Agent，极简Python代码，平替openclaw功能，接近claude code/codex的使用体验，支持 CLI 和 Telegram 双接口。
 
 ## Why Tinabot?
 
-作为 Claude Code 和 Codex 的重度用户，在使用openclaw过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么的情况。Tinabot 的初衷是做一个代码干净、可定制的openclaw平替，给cc/codex**加一个 IM 界面**，通过 Telegram 随时远程操控。
+作为 Claude Code 和 Codex 的重度用户，在使用openclaw过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么，又无法干预的情况。Tinabot 的初衷是做一个代码干净、可定制的openclaw平替，给cc/codex的内核**加一个 IM 界面**，通过 Telegram 随时远程操控。
 
 - **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI 和 Telegram 中，清楚知道 Agent 在做什么、做了多久
 - **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
-- **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住
+- **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住，中断后仍然保持对话上下文
 - **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
-- **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、GPT-4o、o3 等，CLI 命令或 REPL 内一键切换（`tina model set o3` 或 `/model o3`）
+- **多模型自由切换** — 同一套工具和技能，后端可以是 Claude Opus、OpenAI或兼容模型，CLI 命令一键切换（`tina model set claude`）
 - **OpenAI 兼容** — 除原生 OpenAI 外，任何兼容 OpenAI 接口的模型（DeepSeek、Mistral、Ollama、vLLM 等）都可通过 `base_url` 接入
 - **Claude / ChatGPT 订阅直接用** — 通过 OAuth 登录（Claude Code 内 `/login` 或 `tina login openai`）直接使用 Claude/ChatGPT 订阅额度，无需额外购买 API key
 
-简单来说：**给 Claude Code / Codex 加上 Telegram 遥控 + 多模型支持**。
 
 ## 特性
 
@@ -203,8 +202,6 @@ REPL 命令：
 | `/delete <id>` | 删除任务 |
 | `/export [id]` | 导出对话历史 |
 | `/skills` | 列出已加载技能 |
-| `/models` | 列出所有 Profile |
-| `/model [名称]` | 查看或切换 Profile（即时生效） |
 | `/help` | 显示帮助 |
 | `/exit` | 退出 |
 
@@ -313,32 +310,25 @@ always: true
 
 # Tinabot (English)
 
-A local AI agent powered by [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with CLI and Telegram interfaces.
+A local AI agent built on [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with minimal Python code, replacing OpenClaw with a Claude Code/Codex-like experience, supporting both CLI and Telegram interfaces.
 
 ## Why Tinabot?
 
-As a heavy user of Claude Code and Codex, I often ran into long-running tasks with [OpenClaw](https://github.com/nicepkg/openclaw) where token costs piled up with no visibility into what the agent was actually doing. Tinabot was built to **add an IM interface** so you can remotely control your Agent via Telegram from anywhere.
+As a heavy user of Claude Code and Codex, I often ran into long-running tasks with [OpenClaw](https://github.com/nicepkg/openclaw) where token costs piled up with no visibility into what the agent was doing and no way to intervene. Tinabot was built as a clean, customizable OpenClaw replacement — **adding an IM interface** to the core of Claude Code/Codex so you can remotely control it via Telegram anytime.
 
-On top of that, Tinabot implements a complete agent experience in pure Python:
-
-- **Telegram remote control** — Run agent tasks, schedules, and voice commands from your phone, anytime, anywhere
-- **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI and Telegram
+- **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI and Telegram, so you always know what the agent is doing and for how long
 - **Transparent token costs** — Each interaction shows input/output tokens and cost estimate (`↑5.2k ⚡40k ↓1.1k · $0.0534`)
-- **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI
+- **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI — conversation context is preserved after interruption
 - **Reuse existing skills** — Compatible with Claude Code / Codex / OpenClaw `SKILL.md` skill format, reuses `~/.agents/skills/` directly
-- **Multi-model freedom** — Same tools and skills across Claude Opus, GPT-4o, o3, etc. — switch with `tina model set o3` or `/model o3` in REPL
+- **Multi-model switching** — Same tools and skills across Claude Opus, OpenAI, or compatible models — switch with `tina model set claude`
 - **OpenAI-compatible** — Beyond native OpenAI, any OpenAI-compatible API (DeepSeek, Mistral, Ollama, vLLM, etc.) works via `base_url`
-- **ChatGPT subscription support** — OAuth login (`tina login openai`) uses your ChatGPT Plus/Pro subscription directly, no separate API key needed
-
-In short: **Telegram remote control for Claude Code / Codex + multi-model support**.
+- **Use Claude / ChatGPT subscriptions directly** — OAuth login (`claude` → `/login` or `tina login openai`) uses your subscription quota, no separate API key needed
 
 ## Features
 
-- **Multi-model** — Claude Opus/Sonnet, GPT-4o/o3/o4-mini, via API key or ChatGPT OAuth; any OpenAI-compatible API supported
-- **Dual Interface** — Interactive CLI (rich markdown rendering) + Telegram bot
 - **Per-Task Memory** — Each conversation is a "task" with cross-message context, auto-compressed when turns exceed limit
 - **Skills System** — Loads from `~/.agents/skills/*/SKILL.md`, small skills inlined, large skills loaded on demand
-- **Scheduled Tasks** — Create from natural language (e.g. "search reddit daily at 9am"), cron-based background execution
+- **Scheduled Tasks** — Create from natural language (e.g. "search reddit daily at 9am"), cron-based background execution with Telegram delivery
 - **Voice & Photos** — Telegram voice auto-transcription (Groq Whisper), multimodal image recognition + local file access
 - **Full Tool Access** — Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, Task
 
@@ -378,7 +368,8 @@ Edit `~/.tinabot/config.json`:
       "provider": "openai",
       "auth": "oauth",
       "input_price": 2.5,
-      "output_price": 10.0
+      "output_price": 10.0,
+      "cache_read_price": 0.0
     }
   },
   "agent": { ... },
@@ -399,6 +390,44 @@ Edit `~/.tinabot/config.json`:
 | `output_price` | Output token price ($/MTok) |
 | `cache_read_price` | Cache read token price ($/MTok) |
 
+### Profile Examples
+
+**Claude OAuth** (uses Claude Code subscription):
+```json
+{
+  "model": "claude-opus-4-6",
+  "provider": "claude",
+  "auth": "oauth",
+  "input_price": 5.0,
+  "output_price": 25.0,
+  "cache_read_price": 0.5
+}
+```
+
+**OpenAI OAuth** (uses ChatGPT Plus/Pro subscription):
+```json
+{
+  "model": "gpt-4o",
+  "provider": "openai",
+  "auth": "oauth",
+  "input_price": 2.5,
+  "output_price": 10.0
+}
+```
+
+**OpenAI-compatible API** (DeepSeek, NVIDIA, Ollama, etc.):
+```json
+{
+  "model": "deepseek-chat",
+  "provider": "openai",
+  "auth": "api_key",
+  "api_key": "your-key",
+  "base_url": "https://api.deepseek.com/v1",
+  "input_price": 0.14,
+  "output_price": 0.28
+}
+```
+
 ### Auth Setup
 
 - **`oauth`** — Claude uses Claude Code CLI session (`claude` → `/login`); OpenAI uses ChatGPT OAuth (`tina login openai`)
@@ -406,7 +435,8 @@ Edit `~/.tinabot/config.json`:
 
 ```bash
 # Claude OAuth
-claude && /login
+claude        # Start Claude Code CLI
+# > /login    # Login inside the REPL
 
 # OpenAI OAuth
 tina login openai    # Browser opens automatically
@@ -423,21 +453,160 @@ tina model set openai    # Switch to openai profile
 
 In REPL: `/models` to list, `/model openai` to switch (takes effect immediately).
 
+### Other Settings
+
+The `agent` section holds execution parameters independent of profiles:
+
+| Field | Description |
+|---|---|
+| `max_thinking_tokens` | Thinking token limit (default 10000) |
+| `permission_mode` | Claude permission mode: `plan`, `acceptEdits`, `bypassPermissions` |
+| `cwd` | Agent working directory (default `~/.tinabot/workspace`) |
+| `max_tokens` | Max output tokens for non-Claude models |
+| `timeout_seconds` | Per-call timeout in seconds (default 3600) |
+
 ## CLI Usage
 
 ```
-tina                     # Interactive REPL (default)
-tina serve               # Start Telegram bot
+tina                # Interactive REPL (default)
+tina chat           # Same as above
+tina serve          # Start Telegram bot
+tina tasks          # List all tasks
+tina skills         # List loaded skills
+
+# Profile management
 tina model list          # List all profiles
 tina model set <name>    # Switch profile
-tina login openai        # OpenAI OAuth login
-tina login status        # Show auth state
-tina login logout        # Clear OAuth tokens
-tina tasks               # List all tasks
-tina skills              # List loaded skills
-tina user list/add/del   # Manage Telegram allowlist
-tina schedule list/add/del   # Manage scheduled tasks
-tina task list/del/export    # Manage tasks
+
+# Auth management
+tina login openai   # OpenAI OAuth login
+tina login status   # Check auth state
+tina login logout   # Clear OAuth tokens
+
+# User management
+tina user list      # Show Telegram allowlist
+tina user add ID    # Add user to allowlist
+tina user del ID    # Remove user from allowlist
+
+# Scheduled tasks
+tina schedule list                # List all schedules
+tina schedule add --name "..." --cron "0 9 * * *" --prompt "..." --chat ID
+tina schedule del <id>            # Delete a schedule
+
+# Task management
+tina task list      # List all tasks
+tina task del ID    # Delete a task
+tina task export ID # Export conversation history
+```
+
+REPL commands:
+
+| Command | Description |
+|---|---|
+| `/new [name]` | Create a new task |
+| `/tasks` | List all tasks |
+| `/resume <id>` | Switch to a task |
+| `/compress` | Compress current task context |
+| `/delete <id>` | Delete a task |
+| `/export [id]` | Export conversation history |
+| `/skills` | List loaded skills |
+| `/help` | Show help |
+| `/exit` | Quit |
+
+## Telegram Bot
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) to get a token
+2. Configure and run:
+
+```bash
+# Option A: Environment variable
+TINABOT_TELEGRAM__TOKEN=your_token tina serve
+
+# Option B: Config file (~/.tinabot/config.json)
+{
+  "telegram": {
+    "enabled": true,
+    "token": "your_token",
+    "allowed_users": [123456789]
+  }
+}
+```
+
+Each Telegram chat has its own independent task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/skills`, `/schedules`, `/help`.
+
+### Scheduled Tasks
+
+Tell Tina to create scheduled tasks in natural language:
+
+> "Search reddit for OpenClaw posts every day at 9am and send me a summary"
+
+Tina will automatically create a schedule file. The background scheduler checks every 30 seconds and executes the agent when due, sending results to the Telegram chat.
+
+You can also manage schedules via CLI:
+
+```bash
+tina schedule add --name "reddit digest" --cron "0 9 * * *" --prompt "Search reddit for OpenClaw posts and summarize" --chat 123456
+tina schedule list
+tina schedule del reddit-digest
+```
+
+Cron examples: `0 9 * * *` (daily 9am), `*/30 * * * *` (every 30min), `0 9 * * 1-5` (weekdays 9am).
+
+### Voice Messages
+
+Send a voice message in Telegram and Tina will auto-transcribe it via Groq Whisper API, then pass the text to the agent. Requires a Groq API key (free tier is sufficient for daily use).
+
+```bash
+TINABOT_TELEGRAM__GROQ_API_KEY=gsk_xxx tina serve
+# Or in config.json: { "telegram": { "groq_api_key": "gsk_xxx" } }
+```
+
+### Photo Messages
+
+Send a photo (with optional caption) and Tina will save it to `~/.tinabot/data/images/` and pass it to the agent. The agent receives both the image content and the local file path.
+
+### User Management
+
+The Telegram bot requires an explicit allowlist — an empty list rejects all users.
+
+```bash
+tina user add 123456789   # Allow user
+tina user del 123456789   # Remove user
+tina user list            # Show allowlist
+```
+
+### Real-time Progress
+
+While the agent works, status messages show elapsed time, thinking state, and tool calls in real-time:
+
+```
+⏳ 15s
+🧠 Thinking...
+💻 `git status`
+📖 Read `config.py`
+✏️ Edit `main.py`
+```
+
+## Skills
+
+Place skill directories in `~/.agents/skills/`:
+
+```
+~/.agents/skills/
+  my-skill/
+    SKILL.md      # Markdown file, may include YAML frontmatter
+```
+
+Frontmatter example:
+
+```yaml
+---
+name: my-skill
+description: Do something useful
+allowed-tools: Bash,WebSearch
+always: true
+---
+Instructions for the agent...
 ```
 
 ## Requirements
