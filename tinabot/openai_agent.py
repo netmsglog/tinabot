@@ -102,6 +102,10 @@ class OpenAIAgent:
 
         # Load or initialize message history
         messages = self.message_store.get_messages(task_id)
+        # Discard incompatible Responses API format history (no system message)
+        if messages and messages[0].get("role") != "system":
+            self.message_store.clear(task_id)
+            messages = self.message_store.get_messages(task_id)
         if not messages:
             messages.append({"role": "system", "content": system_prompt})
         else:
@@ -321,6 +325,10 @@ class OpenAIAgent:
         # We store Responses API items directly: user/assistant messages,
         # function_call items, and function_call_output items.
         history = self.message_store.get_messages(task_id)
+        # Discard incompatible Chat Completions format history (starts with system message)
+        if history and history[0].get("role") == "system":
+            self.message_store.clear(task_id)
+            history = self.message_store.get_messages(task_id)
 
         # Build user message — multimodal if images present
         # Responses API uses "input_text" and "input_image" content types
@@ -439,7 +447,7 @@ class OpenAIAgent:
         response_id: str | None = None
         output_items: list[dict] = []
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(3600.0, connect=30.0)) as client:
             async with client.stream(
                 "POST", url, headers=headers, json=body
             ) as resp:

@@ -15,9 +15,9 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
-from tinabot.agent import AgentResponse, get_known_models, infer_provider
+from tinabot.agent import AgentResponse
 from tinabot.app import TinaApp
-from tinabot.config import Config
+from tinabot.config import Config, ProfileConfig
 from tinabot.memory import Task
 
 app_cli = typer.Typer(
@@ -115,11 +115,12 @@ async def _run_repl(tina: TinaApp):
     )
 
     task = tina.memory.get_active_task()
-    model_info = f"{tina.config.agent.model} ({tina.config.agent.provider})"
+    profile_label = tina.config.active_profile or tina.config.agent.model
+    model_info = f"{profile_label}: {tina.config.agent.model} ({tina.config.agent.provider})"
     if task:
-        console.print(f"Active task: [{task.id}] {task.name}  Model: {model_info}", style="dim")
+        console.print(f"Active task: [{task.id}] {task.name}  {model_info}", style="dim")
     else:
-        console.print(f"Model: {model_info}", style="dim")
+        console.print(model_info, style="dim")
 
     while True:
         try:
@@ -249,20 +250,26 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
                 console.print(f"  {s['name']}: {s['description']}", style="cyan")
 
     elif command == "/models":
-        _print_model_list(tina.config.agent.model, tina.config.agent.provider)
+        _print_model_list()
 
     elif command == "/model":
         if not arg:
-            console.print(
-                f"Current model: {tina.config.agent.model} ({tina.config.agent.provider})",
-            )
+            agent = tina.config.agent
+            active = Config.load_raw().get("active_profile", "")
+            info = f"Profile: {active}  " if active else ""
+            info += f"{agent.model} ({agent.provider}, {agent.auth})"
+            if agent.base_url:
+                info += f"  base_url: {agent.base_url}"
+            console.print(info)
         else:
-            model, provider = _switch_model(arg)
-            # Update in-memory config and reinitialize agent
-            tina.config.agent.model = model
-            tina.config.agent.provider = provider
-            tina.agent.reinit(tina.config.agent)
-            console.print(f"Switched to {model} ({provider})", style="green")
+            profile = _switch_profile(arg)
+            if profile:
+                tina.config.agent.apply_profile(profile)
+                tina.agent.reinit(tina.config.agent)
+                console.print(
+                    f"Switched to '{arg}': {profile.model} ({profile.provider})",
+                    style="green",
+                )
 
     elif command == "/help":
         console.print(
@@ -274,8 +281,8 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
                 "/delete <id>    Delete a task\n"
                 "/export [id]    Export conversation history\n"
                 "/skills         List loaded skills\n"
-                "/models         List available models\n"
-                "/model [name]   Show or switch model\n"
+                "/models         List profiles\n"
+                "/model [name]   Show or switch profile\n"
                 "/help           Show this help\n"
                 "/exit           Quit",
                 title="Commands",
@@ -489,37 +496,41 @@ def login_openai():
 def login_status():
     """Show current authentication state."""
     config = Config.load()
-    provider = config.agent.provider
+    agent = config.agent
 
-    console.print(f"Provider: {provider}", style="bold")
+    profile_info = f" (profile: {config.active_profile})" if config.active_profile else ""
+    console.print(f"Provider: {agent.provider}{profile_info}", style="bold")
+    console.print(f"Auth mode: {agent.auth}")
 
-    if config.agent.api_key:
-        key = config.agent.api_key
-        masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
-        console.print(f"Auth: API key ({masked})", style="green")
-        return
+    if agent.auth == "api_key":
+        if agent.api_key:
+            key = agent.api_key
+            masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+            console.print(f"API key: {masked}", style="green")
+        else:
+            console.print("API key: not set", style="yellow")
+    elif agent.auth == "oauth":
+        if agent.provider == "openai":
+            from tinabot.openai_auth import OpenAIAuth
 
-    if provider == "openai":
-        from tinabot.openai_auth import OpenAIAuth
-
-        auth = OpenAIAuth()
-        if auth.is_logged_in:
-            console.print(
-                f"Auth: OAuth (ChatGPT login, account: {auth.account_id or 'unknown'})",
-                style="green",
-            )
+            auth = OpenAIAuth()
+            if auth.is_logged_in:
+                console.print(
+                    f"OAuth: ChatGPT (account: {auth.account_id or 'unknown'})",
+                    style="green",
+                )
+            else:
+                console.print(
+                    "OAuth: Not configured. Run 'tina login openai'.",
+                    style="yellow",
+                )
+        elif agent.provider == "claude":
+            console.print("OAuth: Claude SDK (uses 'claude login' session)", style="green")
         else:
             console.print(
-                "Auth: Not configured. Run 'tina login openai' or set api_key in config.",
+                f"OAuth: Not supported for provider '{agent.provider}'",
                 style="yellow",
             )
-    elif provider == "claude":
-        console.print("Auth: Claude SDK (uses 'claude login' session)", style="green")
-    else:
-        console.print(
-            "Auth: Not configured. Set api_key in ~/.tinabot/config.json",
-            style="yellow",
-        )
 
 
 @login_cli.command("logout")
@@ -539,77 +550,75 @@ model_cli = typer.Typer(help="Manage model selection")
 app_cli.add_typer(model_cli, name="model")
 
 
-def _print_model_list(current_model: str, current_provider: str):
-    """Print all known models grouped by provider, marking current with *."""
-    models = get_known_models()
-    console.print(f"Current: {current_model} ({current_provider})\n")
-
-    # Group by provider
-    by_provider: dict[str, list[tuple[str, float, float]]] = {}
-    for name, (provider, inp, out) in models.items():
-        by_provider.setdefault(provider, []).append((name, inp, out))
-
-    for provider_key, label in (("claude", "Claude"), ("openai", "OpenAI")):
-        entries = by_provider.get(provider_key, [])
-        if not entries:
-            continue
-        console.print(f"{label}:", style="bold")
-        for name, inp, out in entries:
-            marker = "*" if name == current_model else " "
-            style = "green" if name == current_model else ""
-            console.print(
-                f"  {marker} {name:<30s}  ${inp:.2f} / ${out:.2f}",
-                style=style,
-            )
-        console.print()
-
-    console.print(
-        "Tip: Any OpenAI-compatible model works — set base_url in config for custom endpoints.",
-        style="dim",
-    )
-
-
-def _switch_model(model_name: str) -> tuple[str, str]:
-    """Validate and persist a model switch. Returns (model, provider)."""
-    provider = infer_provider(model_name)
-    models = get_known_models()
-
-    if model_name not in models:
-        if provider:
-            console.print(
-                f"Warning: Unknown model '{model_name}' — provider auto-detected as {provider}",
-                style="yellow",
-            )
-        else:
-            console.print(
-                f"Warning: Unknown model '{model_name}' — cannot infer provider, keeping current",
-                style="yellow",
-            )
-            # Load current provider as fallback
-            data = Config.load_raw()
-            provider = data.get("agent", {}).get("provider", "claude")
-
+def _print_model_list():
+    """Print all profiles from config.json."""
     data = Config.load_raw()
-    data.setdefault("agent", {})["model"] = model_name
-    data["agent"]["provider"] = provider
+    active = data.get("active_profile", "")
+    profiles = data.get("profiles", {})
+
+    if not profiles:
+        console.print(
+            "No profiles configured. Add profiles to ~/.tinabot/config.json",
+            style="yellow",
+        )
+        return
+
+    console.print(f"Active: {active}\n" if active else "No active profile\n")
+
+    for pname, praw in profiles.items():
+        p = ProfileConfig(**praw)
+        is_active = pname == active
+        marker = "*" if is_active else " "
+        style = "green" if is_active else ""
+
+        # Build detail line
+        auth_tag = p.auth
+        if p.auth == "api_key" and p.api_key:
+            masked = p.api_key[:6] + "..." if len(p.api_key) > 6 else "***"
+            auth_tag = f"key:{masked}"
+
+        price = f"${p.input_price:.2f} / ${p.output_price:.2f}"
+        if p.cache_read_price:
+            price += f" (cache ${p.cache_read_price:.2f})"
+
+        line = f"  {marker} {pname:<16s} {p.model} ({p.provider}, {auth_tag})  {price}"
+        if p.base_url:
+            from urllib.parse import urlparse
+            host = urlparse(p.base_url).hostname or p.base_url
+            line += f"  endpoint:{host}"
+
+        console.print(line, style=style)
+
+
+def _switch_profile(profile_name: str) -> ProfileConfig | None:
+    """Switch active profile. Returns the profile or None if not found."""
+    data = Config.load_raw()
+    profiles = data.get("profiles", {})
+    if profile_name not in profiles:
+        console.print(f"Profile '{profile_name}' not found", style="red")
+        return None
+    data["active_profile"] = profile_name
     Config.save_raw(data)
-    return model_name, provider
+    return ProfileConfig(**profiles[profile_name])
 
 
 @model_cli.command("list")
 def model_list():
-    """List all known models with pricing."""
-    config = Config.load()
-    _print_model_list(config.agent.model, config.agent.provider)
+    """List all configured profiles."""
+    _print_model_list()
 
 
 @model_cli.command("set")
 def model_set(
-    model_name: str = typer.Argument(..., help="Model name to switch to"),
+    name: str = typer.Argument(..., help="Profile name to switch to"),
 ):
-    """Switch the active model."""
-    model, provider = _switch_model(model_name)
-    console.print(f"Switched to {model} ({provider})", style="green")
+    """Switch the active profile."""
+    profile = _switch_profile(name)
+    if profile:
+        console.print(
+            f"Switched to '{name}': {profile.model} ({profile.provider})",
+            style="green",
+        )
 
 
 user_cli = typer.Typer(help="Manage Telegram allowed users")

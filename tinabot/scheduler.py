@@ -155,18 +155,27 @@ class Scheduler:
 
         Uses croniter to find the next fire time after last_run (or created_at).
         If that time is <= now, it's due.
+
+        Cron expressions are in local time (per the prompt), so all comparisons
+        use naive local datetimes — UTC base times are converted to local first.
         """
         try:
             base_str = schedule.last_run or schedule.created_at
             if not base_str:
                 return False
-            base = datetime.fromisoformat(base_str)
-            if base.tzinfo is None:
-                base = base.replace(tzinfo=timezone.utc)
+            try:
+                base = datetime.fromisoformat(base_str)
+            except ValueError:
+                # Bad created_at (e.g. model wrote a literal template) — use epoch
+                base = datetime(2000, 1, 1)
+
+            # Convert to naive local time (cron expressions are local time)
+            if base.tzinfo is not None:
+                base = base.astimezone().replace(tzinfo=None)
 
             cron = croniter(schedule.cron, base)
             next_time = cron.get_next(datetime)
-            now = datetime.now(timezone.utc)
+            now = datetime.now()  # naive local time
             return next_time <= now
         except Exception as e:
             logger.warning(f"Schedule '{schedule.id}' cron error: {e}")

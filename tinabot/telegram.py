@@ -660,6 +660,7 @@ class TelegramBot:
                 else f"{size_kb / 1024:.1f}MB"
             )
             is_pdf = pending_doc.file_name.lower().endswith(".pdf")
+            is_large = pending_doc.size_bytes > 500_000  # >500KB
             hint_lines = [
                 f"[File: {pending_doc.file_name} ({size_str})]",
                 f"[Saved at: {pending_doc.file_path}]",
@@ -670,6 +671,13 @@ class TelegramBot:
                     'the `pages` parameter (e.g. pages="1-10") to read it in '
                     "chunks of at most 20 pages. Do NOT read the entire file at "
                     "once or it will fail.]"
+                )
+            elif is_large:
+                hint_lines.append(
+                    "[IMPORTANT: This file is large. You MUST use the Read tool "
+                    "with the `limit` parameter (e.g. limit=500) to read it in "
+                    "chunks. Do NOT read the entire file at once or it will crash "
+                    "with a buffer overflow. Read in sections of ~500 lines.]"
                 )
             full_prompt = f"{prompt}\n\n" + "\n".join(hint_lines)
             proc_task = asyncio.create_task(

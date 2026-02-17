@@ -75,13 +75,14 @@ Format:
   "chat_id": {chat_id},
   "enabled": true,
   "once": false,
-  "created_at": "<current ISO timestamp>"
+  "created_at": "2025-01-15T09:30:00Z"
 }}
 
 Fields:
 - cron: Standard cron expression (server local time). Examples: "41 12 * * *" (12:41 daily), "0 9 * * *" (9am daily), "*/30 * * * *" (every 30min)
 - once: Set to true for one-time reminders (auto-deleted after execution). Set to false for recurring tasks.
 - prompt: What to send to the user when triggered. For reminders, just put the reminder text directly.
+- created_at: The current time in ISO 8601 format. Run `date -u +%Y-%m-%dT%H:%M:%SZ` to get it, then paste the output as a string value.
 
 One-time reminder example ("12点41分提醒我喝水"):
 {{
@@ -91,7 +92,7 @@ One-time reminder example ("12点41分提醒我喝水"):
   "chat_id": {chat_id},
   "enabled": true,
   "once": true,
-  "created_at": "<current ISO timestamp>"
+  "created_at": "2025-01-15T04:30:00Z"
 }}
 
 Recurring example ("每天9点搜reddit"):
@@ -102,10 +103,11 @@ Recurring example ("每天9点搜reddit"):
   "chat_id": {chat_id},
   "enabled": true,
   "once": false,
-  "created_at": "<current ISO timestamp>"
+  "created_at": "2025-01-15T01:00:00Z"
 }}
 
 ALWAYS use `date` to check the current time first, then construct the correct cron expression.
+For created_at, use the actual timestamp string from `date`, NOT a shell command or template — it must be a literal ISO timestamp like "2025-06-15T09:30:00Z".
 To delete a schedule, delete the file. To list schedules, read ~/.tinabot/data/schedules/.
 Always confirm to the user what was created and when it will trigger.
 """
@@ -232,45 +234,46 @@ class TinaAgent:
         self._use_codex = False   # True when using OAuth Responses API
 
         if not config.is_claude:
-            from tinabot.message_store import MessageStore
-            from tinabot.openai_agent import OpenAIAgent
+            self._init_openai(config)
 
-            self._message_store = MessageStore(
-                Path(self.memory.data_dir)
-            )
+    def _init_openai(self, config: AgentConfig):
+        """Initialize OpenAI-compatible agent based on auth mode."""
+        from tinabot.message_store import MessageStore
+        from tinabot.openai_agent import OpenAIAgent
 
-            if config.provider == "openai" and not config.api_key:
-                # No API key — try OAuth tokens
-                from tinabot.openai_auth import OpenAIAuth
+        self._message_store = MessageStore(Path(self.memory.data_dir))
 
-                self._openai_auth = OpenAIAuth()
-                if self._openai_auth.is_logged_in:
-                    self._use_codex = True
-                    self._openai_agent = OpenAIAgent(
-                        config, self._message_store, auth=self._openai_auth
-                    )
-                else:
-                    logger.warning(
-                        "OpenAI provider with no api_key and no OAuth tokens. "
-                        "Run: tina login openai"
-                    )
-                    self._openai_agent = OpenAIAgent(config, self._message_store)
+        if config.auth == "oauth" and config.provider == "openai":
+            from tinabot.openai_auth import OpenAIAuth
+
+            self._openai_auth = OpenAIAuth()
+            if self._openai_auth.is_logged_in:
+                self._use_codex = True
+                self._openai_agent = OpenAIAgent(
+                    config, self._message_store, auth=self._openai_auth
+                )
             else:
+                logger.warning(
+                    "OpenAI OAuth not configured. Run: tina login openai"
+                )
                 self._openai_agent = OpenAIAgent(config, self._message_store)
+        else:
+            self._openai_agent = OpenAIAgent(config, self._message_store)
 
     def reinit(self, config: AgentConfig):
-        """Reinitialize agent with new config (e.g. after model switch).
+        """Reinitialize agent with new config (e.g. after profile switch).
 
-        Clears message history for all tasks because different models have
-        incompatible tool-call formats and context.
+        Clears message history for all tasks because different models/APIs have
+        incompatible message formats (e.g. Chat Completions vs Responses API).
         """
-        # Clear old message history before switching
-        if self._message_store:
-            from tinabot.message_store import MessageStore
-            # Clear all cached task histories
-            for task in self.memory.list_tasks():
-                self._message_store.clear(task.id)
-            logger.info("Cleared message history for model switch")
+        # Always clear message history on disk — even when coming from Claude
+        # (which has no MessageStore), old files may exist from a prior session
+        from tinabot.message_store import MessageStore
+
+        store = self._message_store or MessageStore(Path(self.memory.data_dir))
+        for task in self.memory.list_tasks():
+            store.clear(task.id)
+        logger.info("Cleared message history for profile switch")
 
         self.config = config
         self._openai_agent = None
@@ -279,30 +282,7 @@ class TinaAgent:
         self._use_codex = False
 
         if not config.is_claude:
-            from tinabot.message_store import MessageStore
-            from tinabot.openai_agent import OpenAIAgent
-
-            self._message_store = MessageStore(
-                Path(self.memory.data_dir)
-            )
-
-            if config.provider == "openai" and not config.api_key:
-                from tinabot.openai_auth import OpenAIAuth
-
-                self._openai_auth = OpenAIAuth()
-                if self._openai_auth.is_logged_in:
-                    self._use_codex = True
-                    self._openai_agent = OpenAIAgent(
-                        config, self._message_store, auth=self._openai_auth
-                    )
-                else:
-                    logger.warning(
-                        "OpenAI provider with no api_key and no OAuth tokens. "
-                        "Run: tina login openai"
-                    )
-                    self._openai_agent = OpenAIAgent(config, self._message_store)
-            else:
-                self._openai_agent = OpenAIAgent(config, self._message_store)
+            self._init_openai(config)
 
     def _build_system_prompt(
         self, task: Task, chat_id: int | None = None
@@ -392,18 +372,12 @@ class TinaAgent:
         )
 
     def _estimate_cost(self, response: AgentResponse) -> float:
-        """Estimate cost from token counts using known model pricing."""
-        in_price, out_price = 5.0, 25.0  # default to Opus pricing
-        for prefix, (ip, op) in MODEL_PRICING.items():
-            if self.config.model.startswith(prefix):
-                in_price, out_price = ip, op
-                break
-        # cache reads are 10% of input price, cache writes are 125%
+        """Estimate cost from token counts using profile-configured pricing."""
         cost = (
-            response.input_tokens * in_price
-            + response.cache_read_tokens * in_price * 0.1
-            + response.cache_creation_tokens * in_price * 1.25
-            + response.output_tokens * out_price
+            response.input_tokens * self.config.input_price
+            + response.cache_read_tokens * self.config.cache_read_price
+            + response.cache_creation_tokens * self.config.input_price * 1.25
+            + response.output_tokens * self.config.output_price
         ) / 1_000_000
         return cost
 
@@ -592,16 +566,10 @@ class TinaAgent:
         return response
 
     def _estimate_cost_openai(self, response: AgentResponse) -> float:
-        """Estimate cost for non-Claude models."""
-        in_price, out_price = 2.5, 10.0  # default to gpt-4o pricing
-        model = self.config.model
-        for name, (ip, op) in MODEL_PRICING_OPENAI.items():
-            if model == name or model.startswith(name):
-                in_price, out_price = ip, op
-                break
+        """Estimate cost for non-Claude models using profile-configured pricing."""
         return (
-            response.input_tokens * in_price
-            + response.output_tokens * out_price
+            response.input_tokens * self.config.input_price
+            + response.output_tokens * self.config.output_price
         ) / 1_000_000
 
     async def _process_openai(

@@ -33,133 +33,130 @@ cd tinabot
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+
+# 拷贝示例配置
+cp config.json.example ~/.tinabot/config.json
 ```
 
-## 认证配置
+## 配置：模型 Profile
 
-Tinabot 支持多种认证方式，按 provider 选择：
+Tinabot 使用 **Profile（配置档）** 管理模型。每个 Profile 是一个完整的模型配置单元，包含模型名称、provider、认证方式、API key、端点和定价。通过 `active_profile` 指定当前使用的 Profile，切换时一键切换全部配置。
 
-### Claude（默认）
-
-```bash
-# 方式 A：通过 Claude Code CLI OAuth 登录
-# 启动 claude，然后在 REPL 内输入 /login
-claude
-# > /login
-
-# 方式 B：API key
-export ANTHROPIC_API_KEY=sk-ant-...
-# 或写入 config.json: "agent": { "api_key": "sk-ant-..." }
-```
-
-### OpenAI — ChatGPT OAuth 登录（推荐）
-
-使用你的 ChatGPT Plus/Pro 订阅，无需单独创建 API key：
-
-```bash
-# 1. 登录（浏览器会自动打开 OpenAI 授权页面）
-tina login openai
-
-# 2. 切换 provider 和模型
-# 编辑 ~/.tinabot/config.json:
-{
-  "agent": {
-    "provider": "openai",
-    "model": "o3"
-  }
-}
-
-# 3. 开始使用
-tina
-```
-
-支持的模型：`gpt-4o`、`gpt-4o-mini`、`gpt-4.1`、`o3`、`o4-mini` 等 ChatGPT 订阅可用的模型。
-
-OAuth token 自动刷新，无需手动管理。
-
-```bash
-# 查看登录状态
-tina login status
-
-# 登出
-tina login logout
-```
-
-### OpenAI — API Key
-
-```bash
-# 编辑 ~/.tinabot/config.json:
-{
-  "agent": {
-    "provider": "openai",
-    "api_key": "sk-...",
-    "model": "gpt-4o"
-  }
-}
-```
-
-### OpenAI 兼容模型（DeepSeek、Mistral、Ollama 等）
-
-任何提供 OpenAI 兼容接口的模型都可以使用，只需设置 `base_url` 指向对应端点：
+直接编辑 `~/.tinabot/config.json`：
 
 ```json
 {
-  "agent": {
-    "provider": "openai",
-    "api_key": "your-key",
-    "model": "deepseek-chat",
-    "base_url": "https://api.deepseek.com/v1"
-  }
+  "active_profile": "claude",
+  "profiles": {
+    "claude": {
+      "model": "claude-opus-4-6",
+      "provider": "claude",
+      "auth": "oauth",
+      "input_price": 5.0,
+      "output_price": 25.0,
+      "cache_read_price": 0.5
+    },
+    "openai": {
+      "model": "gpt-4o",
+      "provider": "openai",
+      "auth": "oauth",
+      "input_price": 2.5,
+      "output_price": 10.0,
+      "cache_read_price": 0.0
+    }
+  },
+  "agent": { ... },
+  "telegram": { ... }
 }
 ```
 
-更多示例：
-- Ollama 本地：`"base_url": "http://localhost:11434/v1"`
-- vLLM：`"base_url": "http://localhost:8000/v1"`
-- Azure OpenAI：`"base_url": "https://your-resource.openai.azure.com/openai/deployments/your-deployment/"`
-
-## 配置
-
-配置从 `~/.tinabot/config.json` 加载，可用 `TINABOT_*` 环境变量覆盖（嵌套用 `__` 分隔）。
-
-```json
-{
-  "agent": {
-    "provider": "claude",
-    "model": "claude-opus-4-6",
-    "max_thinking_tokens": 10000,
-    "permission_mode": "acceptEdits",
-    "cwd": "~/.tinabot/workspace",
-    "api_key": "",
-    "base_url": "",
-    "max_tokens": 16384,
-    "timeout_seconds": 300
-  },
-  "telegram": {
-    "enabled": false,
-    "token": "",
-    "allowed_users": [],
-    "groq_api_key": ""
-  },
-  "memory": {
-    "data_dir": "~/.tinabot/data",
-    "compress_after_turns": 20
-  },
-  "skills": {
-    "skills_dir": "~/.agents/skills"
-  }
-}
-```
+### Profile 字段说明
 
 | 字段 | 说明 |
 |---|---|
-| `provider` | `claude` 或 `openai`（OpenAI 兼容模型也用 `openai`） |
 | `model` | 模型名称 |
-| `api_key` | API key（Claude 或 OpenAI）。OpenAI 留空则使用 OAuth |
-| `base_url` | 自定义 API 端点，用于 OpenAI 兼容模型（留空默认 OpenAI 官方） |
-| `max_tokens` | 非 Claude 模型的最大输出 token 数 |
-| `timeout_seconds` | 单次 Agent 调用超时（0=无限制） |
+| `provider` | `claude` 或 `openai`（OpenAI 兼容模型也用 `openai`） |
+| `auth` | 认证方式：`oauth`（使用订阅）或 `api_key`（使用 API 密钥） |
+| `api_key` | `auth` 为 `api_key` 时填写，`oauth` 时留空 |
+| `base_url` | 自定义 API 端点（OpenAI 兼容模型），留空使用默认 |
+| `input_price` | 输入 token 单价（$/MTok），用于费用估算 |
+| `output_price` | 输出 token 单价（$/MTok） |
+| `cache_read_price` | 缓存读取 token 单价（$/MTok） |
+
+### Profile 示例
+
+**Claude OAuth**（使用 Claude Code 订阅）：
+```json
+{
+  "model": "claude-opus-4-6",
+  "provider": "claude",
+  "auth": "oauth",
+  "input_price": 5.0,
+  "output_price": 25.0,
+  "cache_read_price": 0.5
+}
+```
+
+**OpenAI OAuth**（使用 ChatGPT Plus/Pro 订阅）：
+```json
+{
+  "model": "gpt-4o",
+  "provider": "openai",
+  "auth": "oauth",
+  "input_price": 2.5,
+  "output_price": 10.0
+}
+```
+
+**OpenAI 兼容 API**（DeepSeek、NVIDIA、Ollama 等）：
+```json
+{
+  "model": "deepseek-chat",
+  "provider": "openai",
+  "auth": "api_key",
+  "api_key": "your-key",
+  "base_url": "https://api.deepseek.com/v1",
+  "input_price": 0.14,
+  "output_price": 0.28
+}
+```
+
+### 认证方式
+
+- **`oauth`** — Claude 使用 Claude Code CLI 的 OAuth session（`claude` → `/login`）；OpenAI 使用 ChatGPT OAuth（`tina login openai`）
+- **`api_key`** — 直接在 Profile 中填写 `api_key`
+
+```bash
+# Claude OAuth 登录
+claude        # 启动 Claude Code CLI
+# > /login    # 在 REPL 内登录
+
+# OpenAI OAuth 登录
+tina login openai    # 浏览器自动打开授权页面
+tina login status    # 查看认证状态
+tina login logout    # 登出
+```
+
+### 切换 Profile
+
+```bash
+tina model list          # 列出所有 Profile
+tina model set openai    # 切换到 openai Profile
+```
+
+REPL 内：`/models` 列出、`/model openai` 切换（即时生效）。
+
+### 其他配置
+
+`agent` 部分存放与 Profile 无关的执行参数：
+
+| 字段 | 说明 |
+|---|---|
+| `max_thinking_tokens` | 思考 token 上限（默认 10000） |
 | `permission_mode` | Claude 权限模式：`plan`、`acceptEdits`、`bypassPermissions` |
+| `cwd` | Agent 工作目录（默认 `~/.tinabot/workspace`） |
+| `max_tokens` | 非 Claude 模型的最大输出 token 数 |
+| `timeout_seconds` | 单次 Agent 调用超时秒数（默认 3600） |
 
 ## CLI 使用
 
@@ -170,9 +167,9 @@ tina serve          # 启动 Telegram 机器人
 tina tasks          # 列出所有任务
 tina skills         # 列出已加载的技能
 
-# 模型管理
-tina model list     # 列出所有已知模型和定价
-tina model set o3   # 切换模型（自动检测 provider，写入 config）
+# Profile 管理
+tina model list          # 列出所有 Profile
+tina model set <name>    # 切换 Profile
 
 # 认证管理
 tina login openai   # OpenAI OAuth 登录
@@ -206,8 +203,8 @@ REPL 命令：
 | `/delete <id>` | 删除任务 |
 | `/export [id]` | 导出对话历史 |
 | `/skills` | 列出已加载技能 |
-| `/models` | 列出可用模型和定价 |
-| `/model [名称]` | 查看或切换当前模型（会话内即时生效） |
+| `/models` | 列出所有 Profile |
+| `/model [名称]` | 查看或切换 Profile（即时生效） |
 | `/help` | 显示帮助 |
 | `/exit` | 退出 |
 
@@ -353,84 +350,86 @@ cd tinabot
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+
+# Copy example config
+cp config.json.example ~/.tinabot/config.json
 ```
 
-## Authentication
+## Configuration: Model Profiles
 
-### Claude (default)
+Tinabot uses **Profiles** to manage models. Each profile is a complete model configuration unit containing model name, provider, auth method, API key, endpoint, and pricing. Set `active_profile` to switch all settings atomically.
 
-```bash
-# Option A: OAuth via Claude Code CLI (run claude, then /login inside REPL)
-claude
-# > /login
-
-# Option B: API key
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### OpenAI — ChatGPT OAuth (recommended)
-
-Use your ChatGPT Plus/Pro subscription without creating a separate API key:
-
-```bash
-# 1. Login (browser opens automatically)
-tina login openai
-
-# 2. Set provider and model in ~/.tinabot/config.json:
-{
-  "agent": {
-    "provider": "openai",
-    "model": "o3"
-  }
-}
-
-# 3. Start chatting
-tina
-```
-
-Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `o3`, `o4-mini`, etc.
-
-```bash
-tina login status   # Check auth state
-tina login logout   # Clear OAuth tokens
-```
-
-### OpenAI — API Key
+Edit `~/.tinabot/config.json`:
 
 ```json
 {
-  "agent": {
-    "provider": "openai",
-    "api_key": "sk-...",
-    "model": "gpt-4o"
-  }
+  "active_profile": "claude",
+  "profiles": {
+    "claude": {
+      "model": "claude-opus-4-6",
+      "provider": "claude",
+      "auth": "oauth",
+      "input_price": 5.0,
+      "output_price": 25.0,
+      "cache_read_price": 0.5
+    },
+    "openai": {
+      "model": "gpt-4o",
+      "provider": "openai",
+      "auth": "oauth",
+      "input_price": 2.5,
+      "output_price": 10.0
+    }
+  },
+  "agent": { ... },
+  "telegram": { ... }
 }
 ```
 
-### OpenAI-Compatible Models (DeepSeek, Mistral, Ollama, etc.)
+### Profile Fields
 
-Any model with an OpenAI-compatible API works — just set `base_url`:
+| Field | Description |
+|---|---|
+| `model` | Model name |
+| `provider` | `claude` or `openai` (OpenAI-compatible models also use `openai`) |
+| `auth` | `oauth` (use subscription) or `api_key` (use API key) |
+| `api_key` | Required when `auth` is `api_key`, empty for `oauth` |
+| `base_url` | Custom API endpoint for OpenAI-compatible models (empty = default) |
+| `input_price` | Input token price ($/MTok) for cost estimation |
+| `output_price` | Output token price ($/MTok) |
+| `cache_read_price` | Cache read token price ($/MTok) |
 
-```json
-{
-  "agent": {
-    "provider": "openai",
-    "api_key": "your-key",
-    "model": "deepseek-chat",
-    "base_url": "https://api.deepseek.com/v1"
-  }
-}
+### Auth Setup
+
+- **`oauth`** — Claude uses Claude Code CLI session (`claude` → `/login`); OpenAI uses ChatGPT OAuth (`tina login openai`)
+- **`api_key`** — Set `api_key` directly in the profile
+
+```bash
+# Claude OAuth
+claude && /login
+
+# OpenAI OAuth
+tina login openai    # Browser opens automatically
+tina login status    # Check auth state
+tina login logout    # Clear tokens
 ```
 
-More examples: Ollama local `"http://localhost:11434/v1"`, vLLM `"http://localhost:8000/v1"`.
+### Switching Profiles
+
+```bash
+tina model list          # List all profiles
+tina model set openai    # Switch to openai profile
+```
+
+In REPL: `/models` to list, `/model openai` to switch (takes effect immediately).
 
 ## CLI Usage
 
 ```
 tina                     # Interactive REPL (default)
 tina serve               # Start Telegram bot
-tina model list          # List known models with pricing
-tina model set o3        # Switch model (auto-detects provider, persists to config)
+tina model list          # List all profiles
+tina model set <name>    # Switch profile
 tina login openai        # OpenAI OAuth login
 tina login status        # Show auth state
 tina login logout        # Clear OAuth tokens
