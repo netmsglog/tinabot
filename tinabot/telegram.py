@@ -37,6 +37,14 @@ _CONFIRM_WORDS = frozenset({
     "go", "proceed", "确定", "可以", "没问题", "对",
 })
 
+# Meta-commands: intercepted before sending to LLM
+_SWITCH_TASK_WORDS = frozenset({
+    "切换任务", "任务切换", "switch task", "switch tasks",
+})
+_SWITCH_MODEL_WORDS = frozenset({
+    "切换模型", "模型切换", "switch model", "switch models",
+})
+
 
 def _fmt_tokens(n: int) -> str:
     """Format token count in k units: 0.05k, 5.2k, 11k."""
@@ -450,27 +458,7 @@ class TelegramBot:
     async def _on_tasks(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
             return
-
-        tasks = self.memory.list_tasks()
-        if not tasks:
-            await update.message.reply_text("No tasks.")
-            return
-
-        chat_id = update.message.chat_id
-        active_id = self._chat_tasks.get(chat_id)
-        buttons: list[list[InlineKeyboardButton]] = []
-        for t in tasks[:20]:
-            marker = "\u2705 " if t.id == active_id else ""
-            compressed = " \u2702" if t.summary else ""
-            label = f"{marker}[{t.id}] {t.name[:30]}  t:{t.turn_count}{compressed}"
-            buttons.append([
-                InlineKeyboardButton(label, callback_data=f"task:resume:{t.id}")
-            ])
-
-        await update.message.reply_text(
-            "Tasks (tap to switch):",
-            reply_markup=InlineKeyboardMarkup(buttons),
-        )
+        await self._send_task_picker(update.message.chat_id)
 
     async def _on_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
@@ -577,31 +565,7 @@ class TelegramBot:
     async def _on_models(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
             return
-
-        from tinabot.config import Config
-
-        data = Config.load_raw()
-        active = data.get("active_profile", "")
-        profiles = data.get("profiles", {})
-
-        if not profiles:
-            await update.message.reply_text("No profiles configured.")
-            return
-
-        buttons: list[list[InlineKeyboardButton]] = []
-        for pname, praw in profiles.items():
-            marker = "\u2705 " if pname == active else ""
-            model = praw.get("model", "?")
-            provider = praw.get("provider", "?")
-            label = f"{marker}{pname}: {model} ({provider})"
-            buttons.append([
-                InlineKeyboardButton(label, callback_data=f"model:switch:{pname}")
-            ])
-
-        await update.message.reply_text(
-            "Profiles (tap to switch):",
-            reply_markup=InlineKeyboardMarkup(buttons),
-        )
+        await self._send_model_picker(update.message.chat_id)
 
     async def _on_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
@@ -692,6 +656,59 @@ class TelegramBot:
             "Send any text message to chat!"
         )
 
+    async def _send_task_picker(self, chat_id: int):
+        """Send the task switching inline keyboard."""
+        tasks = self.memory.list_tasks()
+        if not tasks:
+            await self._app.bot.send_message(chat_id, "No tasks.")
+            return
+        active_id = self._chat_tasks.get(chat_id)
+        buttons: list[list[InlineKeyboardButton]] = []
+        for t in tasks[:20]:
+            marker = "\u2705 " if t.id == active_id else ""
+            compressed = " \u2702" if t.summary else ""
+            label = f"{marker}[{t.id}] {t.name[:30]}  t:{t.turn_count}{compressed}"
+            buttons.append([
+                InlineKeyboardButton(label, callback_data=f"task:resume:{t.id}")
+            ])
+        await self._app.bot.send_message(
+            chat_id, "Tasks (tap to switch):",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    async def _send_model_picker(self, chat_id: int):
+        """Send the model profile switching inline keyboard."""
+        from tinabot.config import Config
+
+        data = Config.load_raw()
+        active = data.get("active_profile", "")
+        profiles = data.get("profiles", {})
+        if not profiles:
+            await self._app.bot.send_message(chat_id, "No profiles configured.")
+            return
+        buttons: list[list[InlineKeyboardButton]] = []
+        for pname, praw in profiles.items():
+            marker = "\u2705 " if pname == active else ""
+            model = praw.get("model", "?")
+            provider = praw.get("provider", "?")
+            label = f"{marker}{pname}: {model} ({provider})"
+            buttons.append([
+                InlineKeyboardButton(label, callback_data=f"model:switch:{pname}")
+            ])
+        await self._app.bot.send_message(
+            chat_id, "Profiles (tap to switch):",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    def _is_meta_command(self, text: str) -> str | None:
+        """Check if text is a meta-command. Returns 'task'/'model' or None."""
+        normalized = text.strip().lower()
+        if normalized in _SWITCH_TASK_WORDS:
+            return "task"
+        if normalized in _SWITCH_MODEL_WORDS:
+            return "model"
+        return None
+
     async def _on_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle inline keyboard button presses."""
         query = update.callback_query
@@ -770,6 +787,15 @@ class TelegramBot:
         chat_id = update.message.chat_id
         text = update.message.text or ""
         if not text.strip():
+            return
+
+        # Meta-commands: intercept before sending to LLM
+        meta = self._is_meta_command(text)
+        if meta == "task":
+            await self._send_task_picker(chat_id)
+            return
+        if meta == "model":
+            await self._send_model_picker(chat_id)
             return
 
         # Interrupt any in-flight agent call for this chat
@@ -971,7 +997,7 @@ class TelegramBot:
             return
 
         # Immediate feedback while downloading + transcribing
-        hint_msg = await update.message.reply_text("\U0001f3a4 Transcribing voice...")
+        hint_msg = await update.message.reply_text("...")
 
         try:
             file = await ctx.bot.get_file(voice.file_id)
@@ -1000,6 +1026,15 @@ class TelegramBot:
 
         # Replace hint with the transcribed text
         await hint_msg.edit_text(f"\U0001f399 {text}")
+
+        # Meta-commands: intercept before sending to LLM
+        meta = self._is_meta_command(text)
+        if meta == "task":
+            await self._send_task_picker(chat_id)
+            return
+        if meta == "model":
+            await self._send_model_picker(chat_id)
+            return
 
         # Process as normal text message
         await self._cancel_processing(chat_id)
