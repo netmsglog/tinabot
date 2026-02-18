@@ -209,6 +209,17 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
             else:
                 console.print("Compression failed", style="red")
 
+    elif command == "/rename":
+        if not arg:
+            console.print("Usage: /rename <new name>", style="yellow")
+        else:
+            task = tina.memory.get_active_task()
+            if not task:
+                console.print("No active task", style="yellow")
+            else:
+                tina.memory.rename_task(task.id, arg)
+                console.print(f"Renamed \\[{task.id}] → {arg[:80]}", style="green")
+
     elif command == "/delete":
         if not arg:
             console.print("Usage: /delete <task_id>", style="yellow")
@@ -276,6 +287,7 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
                 "/new [name]     Create a new task\n"
                 "/tasks          List all tasks\n"
                 "/resume <id>    Switch to a task\n"
+                "/rename <name>  Rename current task\n"
                 "/compress       Compress current task context\n"
                 "/delete <id>    Delete a task\n"
                 "/export [id]    Export conversation history\n"
@@ -425,6 +437,23 @@ def task_list():
     else:
         for t in task_list_:
             _print_task_info(t)
+
+
+@task_cli.command("rename")
+def task_rename(
+    task_id: str = typer.Argument(..., help="Task ID to rename"),
+    name: str = typer.Argument(..., help="New name for the task"),
+):
+    """Rename a task."""
+    config = Config.load()
+    tina = TinaApp(config)
+    task = tina.memory.get_task(task_id)
+    if not task:
+        console.print(f"Task '{task_id}' not found", style="yellow")
+        raise typer.Exit(1)
+    old_name = task.name
+    tina.memory.rename_task(task_id, name)
+    console.print(f"Renamed \\[{task_id}] {old_name} → {name[:80]}", style="green")
 
 
 @task_cli.command("del")

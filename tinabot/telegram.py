@@ -192,6 +192,7 @@ class TelegramBot:
         BotCommand("new", "Create a new task"),
         BotCommand("tasks", "List tasks"),
         BotCommand("resume", "Resume a task by ID"),
+        BotCommand("rename", "Rename current task"),
         BotCommand("compress", "Compress current task"),
         BotCommand("models", "List model profiles"),
         BotCommand("model", "Show or switch model profile"),
@@ -291,6 +292,7 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("new", self._on_new))
         self._app.add_handler(CommandHandler("tasks", self._on_tasks))
         self._app.add_handler(CommandHandler("resume", self._on_resume))
+        self._app.add_handler(CommandHandler("rename", self._on_rename))
         self._app.add_handler(CommandHandler("compress", self._on_compress))
         self._app.add_handler(CommandHandler("delete", self._on_delete))
         self._app.add_handler(CommandHandler("export", self._on_export))
@@ -479,6 +481,30 @@ class TelegramBot:
         self._save_chat_tasks()
         await update.message.reply_text(f"Resumed [{task.id}] {task.name}")
 
+    async def _on_rename(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        chat_id = update.message.chat_id
+        name = update.message.text.replace("/rename", "").strip()
+        if not name:
+            await update.message.reply_text("Usage: /rename <new name>")
+            return
+
+        task_id = self._chat_tasks.get(chat_id)
+        if not task_id:
+            await update.message.reply_text("No active task")
+            return
+
+        task = self.memory.get_task(task_id)
+        if not task:
+            await update.message.reply_text("No active task")
+            return
+
+        old_name = task.name
+        self.memory.rename_task(task_id, name)
+        await update.message.reply_text(f"Renamed [{task_id}] {old_name} → {name[:80]}")
+
     async def _on_compress(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
             return
@@ -645,6 +671,7 @@ class TelegramBot:
             "/new [name] - Create a new task\n"
             "/tasks - List tasks\n"
             "/resume <id> - Switch to a task\n"
+            "/rename <name> - Rename current task\n"
             "/compress - Compress current task\n"
             "/delete [id] - Delete current or specified task\n"
             "/export [id] - Export conversation history as file\n"
