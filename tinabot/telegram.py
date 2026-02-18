@@ -214,7 +214,7 @@ class TelegramBot:
         self._chat_tasks_path = Path(memory.data_dir) / "chat_tasks.json"
         self._load_chat_tasks()
         self._typing_tasks: dict[int, asyncio.Task] = {}
-        self._processing: dict[int, asyncio.Task] = {}  # chat_id -> agent task
+        self._processing: dict[str, asyncio.Task] = {}  # task_id -> agent task
         self._shutdown_event: asyncio.Event | None = None
         self._pending_photos: dict[int, _PendingPhoto] = {}  # chat_id -> pending
         self._pending_documents: dict[int, _PendingDocument] = {}
@@ -820,8 +820,11 @@ class TelegramBot:
             await self._send_model_picker(chat_id)
             return
 
-        # Interrupt any in-flight agent call for this chat
-        await self._cancel_processing(chat_id)
+        # Resolve current task for this chat
+        cur_task_id = self._get_or_create_task(chat_id, text)
+
+        # Cancel only this task's in-flight processing (other tasks keep running)
+        await self._cancel_processing(cur_task_id)
 
         # Check for pending photo
         pending_photo = self._pending_photos.pop(chat_id, None)
@@ -838,9 +841,9 @@ class TelegramBot:
                     images=[pending_photo.image], no_thinking=True,
                 )
             )
-            self._processing[chat_id] = proc_task
+            self._processing[cur_task_id] = proc_task
             proc_task.add_done_callback(
-                lambda _: self._processing.pop(chat_id, None)
+                lambda _, tid=cur_task_id: self._processing.pop(tid, None)
             )
             return
 
@@ -881,18 +884,18 @@ class TelegramBot:
                     chat_id, full_prompt, update, no_thinking=True,
                 )
             )
-            self._processing[chat_id] = proc_task
+            self._processing[cur_task_id] = proc_task
             proc_task.add_done_callback(
-                lambda _: self._processing.pop(chat_id, None)
+                lambda _, tid=cur_task_id: self._processing.pop(tid, None)
             )
             return
 
         # Normal text message
         proc_task = asyncio.create_task(self._process_message(chat_id, text, update))
-        self._processing[chat_id] = proc_task
-
-        # Clean up reference when done (don't await - let it run)
-        proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
+        self._processing[cur_task_id] = proc_task
+        proc_task.add_done_callback(
+            lambda _, tid=cur_task_id: self._processing.pop(tid, None)
+        )
 
     async def _on_photo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle photo: save to disk, confirm with user, wait for next message."""
@@ -1059,17 +1062,20 @@ class TelegramBot:
             return
 
         # Process as normal text message
-        await self._cancel_processing(chat_id)
+        cur_task_id = self._get_or_create_task(chat_id, text)
+        await self._cancel_processing(cur_task_id)
 
         proc_task = asyncio.create_task(
             self._process_message(chat_id, text, update, status_note=f"\U0001f399 {text}")
         )
-        self._processing[chat_id] = proc_task
-        proc_task.add_done_callback(lambda _: self._processing.pop(chat_id, None))
+        self._processing[cur_task_id] = proc_task
+        proc_task.add_done_callback(
+            lambda _, tid=cur_task_id: self._processing.pop(tid, None)
+        )
 
-    async def _cancel_processing(self, chat_id: int):
-        """Cancel in-flight agent processing for a chat."""
-        proc = self._processing.pop(chat_id, None)
+    async def _cancel_processing(self, task_id: str):
+        """Cancel in-flight agent processing for a specific task."""
+        proc = self._processing.pop(task_id, None)
         if proc and not proc.done():
             proc.cancel()
             # Wait briefly for cleanup to finish
@@ -1094,6 +1100,7 @@ class TelegramBot:
         # Get/create task for this chat
         task_id = self._get_or_create_task(chat_id, text)
         task = self.memory.get_task(task_id)
+        task_name = task.name if task else task_id
 
         # Send initial status message that we'll edit in-place
         status_msg = await self._app.bot.send_message(chat_id, "\u23f3 Thinking...")
@@ -1120,6 +1127,10 @@ class TelegramBot:
             if response.cost_usd is not None:
                 footer = _format_usage_footer(response)
                 reply += f"\n\n_{footer}_"
+
+            # If user switched away from this task, label the response
+            if self._chat_tasks.get(chat_id) != task_id:
+                reply = f"*\\[{task_name}]*\n\n{reply}"
 
             await self._send(chat_id, reply)
 
