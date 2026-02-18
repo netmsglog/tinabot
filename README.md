@@ -187,9 +187,10 @@ tina schedule add --name "..." --cron "0 9 * * *" --prompt "..." --chat ID
 tina schedule del <id>            # Delete a schedule
 
 # Task management
-tina task list      # List all tasks
-tina task del ID    # Delete a task
-tina task export ID # Export conversation history
+tina task list        # List all tasks
+tina task rename ID N # Rename a task
+tina task del ID      # Delete a task
+tina task export ID   # Export conversation history
 
 # Interaction history
 tina history export ID         # Print interaction history
@@ -203,6 +204,7 @@ REPL commands:
 | `/new [name]` | Create a new task |
 | `/tasks` | List all tasks |
 | `/resume <id>` | Switch to a task |
+| `/rename <name>` | Rename current task |
 | `/compress` | Compress current task context |
 | `/delete <id>` | Delete a task |
 | `/export [id]` | Export conversation history |
@@ -229,7 +231,7 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 }
 ```
 
-Each Telegram chat has its own independent task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/models`, `/model`, `/skills`, `/schedules`, `/help`.
+Each Telegram chat has its own independent task. Bot menu commands: `/new`, `/tasks`, `/rename`, `/models`, `/compress`, `/delete`, `/schedules`, `/help`.
 
 ### Task & Model Switching
 
@@ -515,9 +517,10 @@ tina schedule add --name "..." --cron "0 9 * * *" --prompt "..." --chat ID
 tina schedule del <id>            # 删除定时任务
 
 # 任务管理
-tina task list      # 列出所有任务
-tina task del ID    # 删除任务
-tina task export ID # 导出对话历史
+tina task list        # 列出所有任务
+tina task rename ID N # 重命名任务
+tina task del ID      # 删除任务
+tina task export ID   # 导出对话历史
 
 # 交互历史
 tina history export ID         # 打印交互历史
@@ -531,6 +534,7 @@ REPL 命令：
 | `/new [名称]` | 创建新任务 |
 | `/tasks` | 列出所有任务 |
 | `/resume <id>` | 切换到指定任务 |
+| `/rename <名称>` | 重命名当前任务 |
 | `/compress` | 压缩当前任务上下文 |
 | `/delete <id>` | 删除任务 |
 | `/export [id]` | 导出对话历史 |
@@ -557,7 +561,7 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 }
 ```
 
-每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/models`、`/model`、`/skills`、`/schedules`、`/help`。
+每个 Telegram 聊天拥有独立的任务。菜单命令：`/new`、`/tasks`、`/rename`、`/models`、`/compress`、`/delete`、`/schedules`、`/help`。
 
 ### 任务 & 模型切换
 
