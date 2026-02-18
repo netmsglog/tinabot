@@ -231,6 +231,19 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 
 Each Telegram chat has its own independent task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/models`, `/model`, `/skills`, `/schedules`, `/help`.
 
+### Task & Model Switching
+
+Use `/tasks` or `/models` to get an inline keyboard — tap any button to switch instantly. The list updates in-place to show the new selection.
+
+You can also type or say (voice message) these meta-commands:
+
+| Input | Action |
+|---|---|
+| `切换任务` / `switch task` | Show task picker |
+| `切换模型` / `switch model` | Show model picker |
+
+Meta-commands are intercepted before reaching the LLM, so they work even when the agent is busy or the model is unavailable.
+
 ### Scheduled Tasks
 
 Tell Tina to create scheduled tasks in natural language:
@@ -545,6 +558,19 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 ```
 
 每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/models`、`/model`、`/skills`、`/schedules`、`/help`。
+
+### 任务 & 模型切换
+
+使用 `/tasks` 或 `/models` 弹出 inline 选择键盘，点击按钮即时切换，列表原地刷新显示当前选中项。
+
+也可以直接输入文字或发送语音：
+
+| 输入 | 效果 |
+|---|---|
+| `切换任务` / `switch task` | 弹出任务选择键盘 |
+| `切换模型` / `switch model` | 弹出模型选择键盘 |
+
+这些元指令在到达 LLM 之前被拦截处理，即使 Agent 忙碌或模型不可用也能正常工作。
 
 ### 定时任务
 
