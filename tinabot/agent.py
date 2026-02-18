@@ -441,6 +441,11 @@ class TinaAgent:
         if task is None:
             task = self.memory.create_task(message[:80])
 
+        # Auto-rename generic tasks on first message
+        if task.turn_count == 0 and task.name in ("New task", "Default task"):
+            self.memory.rename_task(task.id, message[:80])
+            task.name = message[:80]
+
         # Route non-Claude providers to OpenAI agent
         if not self.config.is_claude:
             return await self._process_openai(

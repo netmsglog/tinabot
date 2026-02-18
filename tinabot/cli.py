@@ -84,11 +84,10 @@ def _print_response(r: AgentResponse):
 
 def _print_task_info(task: Task):
     """Print task summary."""
-    status = "active" if task.active else ""
     compressed = " (compressed)" if task.summary else ""
     session = f" session:{task.session_id[:8]}" if task.session_id else ""
     console.print(
-        f"  [{task.id}] {task.name}"
+        f"  \\[{task.id}] {task.name}"
         f"  turns:{task.turn_count}{compressed}{session}"
         f"  {'*' if task.active else ''}",
         style="green" if task.active else "",
@@ -118,7 +117,7 @@ async def _run_repl(tina: TinaApp):
     profile_label = tina.config.active_profile or tina.config.agent.model
     model_info = f"{profile_label}: {tina.config.agent.model} ({tina.config.agent.provider})"
     if task:
-        console.print(f"Active task: [{task.id}] {task.name}  {model_info}", style="dim")
+        console.print(f"Active task: \\[{task.id}] {task.name}  {model_info}", style="dim")
     else:
         console.print(model_info, style="dim")
 
@@ -175,7 +174,7 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
     elif command == "/new":
         name = arg or "New task"
         task = tina.memory.create_task(name)
-        console.print(f"Created task [{task.id}] {task.name}", style="green")
+        console.print(f"Created task \\[{task.id}] {task.name}", style="green")
 
     elif command == "/tasks":
         tasks = tina.memory.list_tasks()
@@ -192,7 +191,7 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
         else:
             task = tina.memory.set_active(arg)
             if task:
-                console.print(f"Resumed task [{task.id}] {task.name}", style="green")
+                console.print(f"Resumed task \\[{task.id}] {task.name}", style="green")
             else:
                 console.print(f"Task '{arg}' not found", style="red")
 
@@ -219,7 +218,7 @@ async def _handle_command(cmd: str, tina: TinaApp) -> str | None:
                 console.print(f"Task '{arg}' not found", style="yellow")
             else:
                 tina.memory.delete_task(arg)
-                console.print(f"Deleted [{arg}] {task.name}", style="green")
+                console.print(f"Deleted \\[{arg}] {task.name}", style="green")
 
     elif command == "/export":
         task_id = arg
@@ -393,7 +392,7 @@ def schedule_add(
     config = Config.load()
     store = ScheduleStore(config.memory.data_dir)
     s = store.add(name=name, cron=cron, prompt=prompt, chat_id=chat)
-    console.print(f"Created schedule [{s.id}] {s.name}  cron: {s.cron}", style="green")
+    console.print(f"Created schedule \\[{s.id}] {s.name}  cron: {s.cron}", style="green")
 
 
 @schedule_cli.command("del")
@@ -440,7 +439,7 @@ def task_del(
         console.print(f"Task '{task_id}' not found", style="yellow")
         raise typer.Exit(1)
     tina.memory.delete_task(task_id)
-    console.print(f"Deleted [{task_id}] {task.name}", style="green")
+    console.print(f"Deleted \\[{task_id}] {task.name}", style="green")
 
 
 @task_cli.command("export")

@@ -110,6 +110,13 @@ class TaskMemory:
             reverse=True,
         )
 
+    def rename_task(self, task_id: str, name: str):
+        """Rename a task."""
+        task = self._tasks.get(task_id)
+        if task:
+            task.name = name[:80]
+            self._save()
+
     def update_session_id(self, task_id: str, session_id: str):
         """Store the SDK session ID for a task."""
         task = self._tasks.get(task_id)
