@@ -184,6 +184,8 @@ class TelegramBot:
         BotCommand("tasks", "List tasks"),
         BotCommand("resume", "Resume a task by ID"),
         BotCommand("compress", "Compress current task"),
+        BotCommand("models", "List model profiles"),
+        BotCommand("model", "Show or switch model profile"),
         BotCommand("skills", "List available skills"),
         BotCommand("schedules", "List scheduled tasks"),
         BotCommand("help", "Show commands"),
@@ -283,6 +285,8 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("compress", self._on_compress))
         self._app.add_handler(CommandHandler("delete", self._on_delete))
         self._app.add_handler(CommandHandler("export", self._on_export))
+        self._app.add_handler(CommandHandler("models", self._on_models))
+        self._app.add_handler(CommandHandler("model", self._on_model))
         self._app.add_handler(CommandHandler("skills", self._on_skills))
         self._app.add_handler(CommandHandler("schedules", self._on_schedules))
         self._app.add_handler(CommandHandler("help", self._on_help))
@@ -561,6 +565,63 @@ class TelegramBot:
         buf.name = f"task_{task_id}.md"
         await self._app.bot.send_document(chat_id, document=buf)
 
+    async def _on_models(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        from tinabot.config import Config
+
+        data = Config.load_raw()
+        active = data.get("active_profile", "")
+        profiles = data.get("profiles", {})
+
+        if not profiles:
+            await update.message.reply_text("No profiles configured.")
+            return
+
+        lines = [f"Active: {active}" if active else "No active profile", ""]
+        for pname, praw in profiles.items():
+            marker = "*" if pname == active else " "
+            model = praw.get("model", "?")
+            provider = praw.get("provider", "?")
+            lines.append(f"{marker} {pname}: {model} ({provider})")
+
+        await update.message.reply_text("\n".join(lines))
+
+    async def _on_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not update.message or not await self._check_allowed(update):
+            return
+
+        arg = update.message.text.replace("/model", "").strip()
+
+        if not arg:
+            agent = self.agent.config
+            from tinabot.config import Config
+
+            active = Config.load_raw().get("active_profile", "")
+            info = f"Profile: {active}\n" if active else ""
+            info += f"{agent.model} ({agent.provider})"
+            await update.message.reply_text(info)
+            return
+
+        from tinabot.config import Config, ProfileConfig
+
+        data = Config.load_raw()
+        profiles = data.get("profiles", {})
+        if arg not in profiles:
+            await update.message.reply_text(f"Profile '{arg}' not found")
+            return
+
+        profile = ProfileConfig(**profiles[arg])
+        data["active_profile"] = arg
+        Config.save_raw(data)
+
+        self.agent.config.apply_profile(profile)
+        self.agent.reinit(self.agent.config)
+        await update.message.reply_text(
+            f"Switched to '{arg}': {profile.model} ({profile.provider})"
+        )
+
     async def _on_skills(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
             return
@@ -608,6 +669,8 @@ class TelegramBot:
             "/compress - Compress current task\n"
             "/delete [id] - Delete current or specified task\n"
             "/export [id] - Export conversation history as file\n"
+            "/models - List model profiles\n"
+            "/model [name] - Show or switch profile\n"
             "/skills - List skills\n"
             "/schedules - List scheduled tasks\n"
             "/help - This message\n\n"

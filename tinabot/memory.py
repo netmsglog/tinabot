@@ -196,6 +196,9 @@ class TaskMemory:
             path = self.data_dir / subdir / f"{task_id}.md"
             if path.exists():
                 path.unlink()
+        history_path = self.data_dir / "history" / f"{task_id}.jsonl"
+        if history_path.exists():
+            history_path.unlink()
 
         self._save()
         return True

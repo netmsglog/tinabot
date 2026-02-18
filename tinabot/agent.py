@@ -11,6 +11,7 @@ from typing import Any, Callable, Awaitable
 from loguru import logger
 
 from tinabot.config import AgentConfig
+from tinabot.history import HistoryLogger
 from tinabot.memory import Task, TaskMemory
 from tinabot.skills import SkillsLoader
 
@@ -226,6 +227,7 @@ class TinaAgent:
         self.config = config
         self.skills = skills_loader
         self.memory = task_memory
+        self._history = HistoryLogger(task_memory.data_dir)
 
         # Lazy-init for non-Claude providers
         self._openai_agent = None
@@ -446,6 +448,22 @@ class TinaAgent:
             self.memory.rename_task(task.id, message[:80])
             task.name = message[:80]
 
+        # Log user message
+        self._history.log(
+            task.id, "user_message", text=message,
+            **({"chat_id": chat_id} if chat_id else {}),
+        )
+
+        # Wrap on_tool to capture tool calls in history
+        original_on_tool = on_tool
+
+        async def _logging_on_tool(name: str, input_dict: dict) -> None:
+            self._history.log(task.id, "tool_call", name=name, input=input_dict)
+            if original_on_tool:
+                result = original_on_tool(name, input_dict)
+                if hasattr(result, "__await__"):
+                    await result
+
         # Route non-Claude providers to OpenAI agent
         if not self.config.is_claude:
             return await self._process_openai(
@@ -453,7 +471,7 @@ class TinaAgent:
                 task=task,
                 on_text=on_text,
                 on_thinking=on_thinking,
-                on_tool=on_tool,
+                on_tool=_logging_on_tool,
                 chat_id=chat_id,
                 images=images,
             )
@@ -467,6 +485,9 @@ class TinaAgent:
         )
         response = AgentResponse()
         text_parts: list[str] = []
+
+        # Log system prompt
+        self._history.log(task.id, "system_prompt", text=options.system_prompt)
 
         # Build prompt: multimodal if images present, plain string otherwise
         prompt: str | AsyncIterator[dict[str, Any]] = message
@@ -518,10 +539,7 @@ class TinaAgent:
 
                             elif isinstance(block, ToolUseBlock):
                                 response.tool_uses.append(block.name)
-                                if on_tool:
-                                    result = on_tool(block.name, block.input)
-                                    if hasattr(result, "__await__"):
-                                        await result
+                                await _logging_on_tool(block.name, block.input)
 
                     elif isinstance(msg, ResultMessage):
                         response.session_id = msg.session_id
@@ -561,6 +579,21 @@ class TinaAgent:
 
         response.text = "\n".join(text_parts) if text_parts else ""
 
+        # Log response
+        self._history.log(
+            task.id, "response",
+            text=response.text or None,
+            thinking=response.thinking or None,
+            input_tokens=response.input_tokens or None,
+            output_tokens=response.output_tokens or None,
+            cache_read_tokens=response.cache_read_tokens or None,
+            cache_creation_tokens=response.cache_creation_tokens or None,
+            cost_usd=response.cost_usd,
+            tool_uses=response.tool_uses or None,
+            model=self.config.model,
+            num_turns=response.num_turns or None,
+        )
+
         # Save last response as safety net (survives session loss / compression)
         if response.text:
             self.memory.save_last_response(task.id, response.text)
@@ -589,6 +622,7 @@ class TinaAgent:
     ) -> AgentResponse:
         """Process a message via OpenAI-compatible provider."""
         system_prompt = self._build_system_prompt(task, chat_id=chat_id)
+        self._history.log(task.id, "system_prompt", text=system_prompt)
 
         mode = "codex" if self._use_codex else "api"
         logger.info(
@@ -654,6 +688,21 @@ class TinaAgent:
         except Exception as e:
             logger.error(f"OpenAI agent error: {e}")
             response.text = f"Error: {e}"
+
+        # Log response
+        self._history.log(
+            task.id, "response",
+            text=response.text or None,
+            thinking=response.thinking or None,
+            input_tokens=response.input_tokens or None,
+            output_tokens=response.output_tokens or None,
+            cache_read_tokens=response.cache_read_tokens or None,
+            cache_creation_tokens=response.cache_creation_tokens or None,
+            cost_usd=response.cost_usd,
+            tool_uses=response.tool_uses or None,
+            model=self.config.model,
+            num_turns=response.num_turns or None,
+        )
 
         # Save last response
         if response.text:

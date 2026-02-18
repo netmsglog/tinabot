@@ -19,6 +19,7 @@ As a heavy user of Claude Code and Codex, I often ran into long-running tasks wi
 ## Features
 
 - **Per-Task Memory** — Each conversation is a "task" with cross-message context, auto-compressed when turns exceed limit
+- **Interaction History** — Every user message, tool call, and response is logged per-task as JSONL for full replay and analysis (`tina history export <id>`)
 - **Skills System** — Loads from `~/.agents/skills/*/SKILL.md`, small skills inlined, large skills loaded on demand
 - **Scheduled Tasks** — Create from natural language (e.g. "search reddit daily at 9am"), cron-based background execution with Telegram delivery
 - **Voice & Photos** — Telegram voice auto-transcription (Groq Whisper), multimodal image recognition + local file access
@@ -189,6 +190,10 @@ tina schedule del <id>            # Delete a schedule
 tina task list      # List all tasks
 tina task del ID    # Delete a task
 tina task export ID # Export conversation history
+
+# Interaction history
+tina history export ID         # Print interaction history
+tina history export ID -o f    # Export to file
 ```
 
 REPL commands:
@@ -224,7 +229,7 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 }
 ```
 
-Each Telegram chat has its own independent task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/skills`, `/schedules`, `/help`.
+Each Telegram chat has its own independent task. Bot commands: `/new`, `/tasks`, `/resume`, `/compress`, `/models`, `/model`, `/skills`, `/schedules`, `/help`.
 
 ### Scheduled Tasks
 
@@ -328,6 +333,7 @@ Instructions for the agent...
 ## 特性
 
 - **按任务记忆** — 每个对话是独立的"任务"，跨消息保持上下文，超过设定轮次自动压缩
+- **交互历史** — 每个任务的用户消息、工具调用、响应全部按时间顺序记录为 JSONL，支持完整回溯（`tina history export <id>`）
 - **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载，小技能内联 system prompt，大技能按需加载
 - **定时任务** — 用自然语言创建（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并发送到 Telegram
 - **语音 & 图片** — Telegram 语音消息自动转写（Groq Whisper），图片多模态识别+本地文件操作
@@ -499,6 +505,10 @@ tina schedule del <id>            # 删除定时任务
 tina task list      # 列出所有任务
 tina task del ID    # 删除任务
 tina task export ID # 导出对话历史
+
+# 交互历史
+tina history export ID         # 打印交互历史
+tina history export ID -o f    # 导出到文件
 ```
 
 REPL 命令：
@@ -534,7 +544,7 @@ TINABOT_TELEGRAM__TOKEN=your_token tina serve
 }
 ```
 
-每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/skills`、`/schedules`、`/help`。
+每个 Telegram 聊天拥有独立的任务。机器人命令：`/new`、`/tasks`、`/resume`、`/compress`、`/models`、`/model`、`/skills`、`/schedules`、`/help`。
 
 ### 定时任务
 

@@ -468,6 +468,39 @@ def task_export(
         console.print(history)
 
 
+history_cli = typer.Typer(help="Task interaction history")
+app_cli.add_typer(history_cli, name="history")
+
+
+@history_cli.command("export")
+def history_export(
+    task_id: str = typer.Argument(..., help="Task ID to export"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path"),
+):
+    """Export task interaction history (user messages, tool calls, responses)."""
+    from tinabot.history import HistoryLogger
+
+    config = Config.load()
+    tina = TinaApp(config)
+    task = tina.memory.get_task(task_id)
+    task_name = task.name if task else ""
+
+    hist = HistoryLogger(config.memory.data_dir)
+    text = hist.format_export(task_id, task_name=task_name)
+    if not text:
+        console.print(
+            f"No interaction history for task '{task_id}'.",
+            style="yellow",
+        )
+        raise typer.Exit(1)
+
+    if output:
+        Path(output).write_text(text, encoding="utf-8")
+        console.print(f"Exported to {output}", style="green")
+    else:
+        console.print(text)
+
+
 login_cli = typer.Typer(help="Manage provider authentication")
 app_cli.add_typer(login_cli, name="login")
 
