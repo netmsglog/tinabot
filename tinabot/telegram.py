@@ -188,15 +188,12 @@ class TelegramBot:
     """
 
     BOT_COMMANDS = [
-        BotCommand("start", "Start the bot"),
         BotCommand("new", "Create a new task"),
-        BotCommand("tasks", "List tasks"),
-        BotCommand("resume", "Resume a task by ID"),
+        BotCommand("tasks", "List / switch tasks"),
         BotCommand("rename", "Rename current task"),
+        BotCommand("models", "List / switch model profiles"),
         BotCommand("compress", "Compress current task"),
-        BotCommand("models", "List model profiles"),
-        BotCommand("model", "Show or switch model profile"),
-        BotCommand("skills", "List available skills"),
+        BotCommand("delete", "Delete a task"),
         BotCommand("schedules", "List scheduled tasks"),
         BotCommand("help", "Show commands"),
     ]
@@ -669,18 +666,16 @@ class TelegramBot:
         await update.message.reply_text(
             "Tina commands:\n\n"
             "/new [name] - Create a new task\n"
-            "/tasks - List tasks\n"
-            "/resume <id> - Switch to a task\n"
+            "/tasks - List / switch tasks\n"
             "/rename <name> - Rename current task\n"
             "/compress - Compress current task\n"
-            "/delete [id] - Delete current or specified task\n"
-            "/export [id] - Export conversation history as file\n"
-            "/models - List model profiles\n"
-            "/model [name] - Show or switch profile\n"
-            "/skills - List skills\n"
-            "/schedules - List scheduled tasks\n"
-            "/help - This message\n\n"
-            "Send any text message to chat!"
+            "/delete [id] - Delete task\n"
+            "/models - List / switch model profiles\n"
+            "/schedules - List scheduled tasks\n\n"
+            "Voice/text shortcuts:\n"
+            "\"切换任务\" or \"switch task\"\n"
+            "\"切换模型\" or \"switch model\"\n\n"
+            "Also available: /resume, /model, /export, /skills"
         )
 
     async def _send_task_picker(self, chat_id: int):
