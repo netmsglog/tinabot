@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -291,6 +292,9 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("schedules", self._on_schedules))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
+        # Inline keyboard callback handler
+        self._app.add_handler(CallbackQueryHandler(self._on_callback))
+
         # Message handlers
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
@@ -318,7 +322,7 @@ class TelegramBot:
             logger.warning(f"Failed to register commands: {e}")
 
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=["message", "callback_query"],
             drop_pending_updates=True,
         )
 
@@ -454,14 +458,19 @@ class TelegramBot:
 
         chat_id = update.message.chat_id
         active_id = self._chat_tasks.get(chat_id)
-        lines = []
-        for t in tasks[:20]:  # Limit display
-            marker = " *" if t.id == active_id else ""
-            compressed = " (compressed)" if t.summary else ""
-            lines.append(
-                f"[{t.id}] {t.name}  turns:{t.turn_count}{compressed}{marker}"
-            )
-        await update.message.reply_text("\n".join(lines))
+        buttons: list[list[InlineKeyboardButton]] = []
+        for t in tasks[:20]:
+            marker = "\u2705 " if t.id == active_id else ""
+            compressed = " \u2702" if t.summary else ""
+            label = f"{marker}[{t.id}] {t.name[:30]}  t:{t.turn_count}{compressed}"
+            buttons.append([
+                InlineKeyboardButton(label, callback_data=f"task:resume:{t.id}")
+            ])
+
+        await update.message.reply_text(
+            "Tasks (tap to switch):",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
     async def _on_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
@@ -579,14 +588,20 @@ class TelegramBot:
             await update.message.reply_text("No profiles configured.")
             return
 
-        lines = [f"Active: {active}" if active else "No active profile", ""]
+        buttons: list[list[InlineKeyboardButton]] = []
         for pname, praw in profiles.items():
-            marker = "*" if pname == active else " "
+            marker = "\u2705 " if pname == active else ""
             model = praw.get("model", "?")
             provider = praw.get("provider", "?")
-            lines.append(f"{marker} {pname}: {model} ({provider})")
+            label = f"{marker}{pname}: {model} ({provider})"
+            buttons.append([
+                InlineKeyboardButton(label, callback_data=f"model:switch:{pname}")
+            ])
 
-        await update.message.reply_text("\n".join(lines))
+        await update.message.reply_text(
+            "Profiles (tap to switch):",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
     async def _on_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not update.message or not await self._check_allowed(update):
@@ -676,6 +691,76 @@ class TelegramBot:
             "/help - This message\n\n"
             "Send any text message to chat!"
         )
+
+    async def _on_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle inline keyboard button presses."""
+        query = update.callback_query
+        if not query or not query.from_user:
+            return
+        if not self._is_allowed(query.from_user.id):
+            await query.answer("Not authorized", show_alert=True)
+            return
+
+        data = query.data or ""
+        chat_id = query.message.chat_id
+
+        if data.startswith("task:resume:"):
+            task_id = data.removeprefix("task:resume:")
+            task = self.memory.get_task(task_id)
+            if not task:
+                await query.answer("Task not found", show_alert=True)
+                return
+            self._chat_tasks[chat_id] = task.id
+            self._save_chat_tasks()
+            await query.answer(f"Switched to [{task.id}]")
+            # Refresh the task list to update the active marker
+            active_id = task.id
+            tasks = self.memory.list_tasks()
+            buttons: list[list[InlineKeyboardButton]] = []
+            for t in tasks[:20]:
+                marker = "\u2705 " if t.id == active_id else ""
+                compressed = " \u2702" if t.summary else ""
+                label = f"{marker}[{t.id}] {t.name[:30]}  t:{t.turn_count}{compressed}"
+                buttons.append([
+                    InlineKeyboardButton(label, callback_data=f"task:resume:{t.id}")
+                ])
+            await query.edit_message_text(
+                "Tasks (tap to switch):",
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+
+        elif data.startswith("model:switch:"):
+            profile_name = data.removeprefix("model:switch:")
+            from tinabot.config import Config, ProfileConfig
+
+            cfg_data = Config.load_raw()
+            profiles = cfg_data.get("profiles", {})
+            if profile_name not in profiles:
+                await query.answer("Profile not found", show_alert=True)
+                return
+            profile = ProfileConfig(**profiles[profile_name])
+            cfg_data["active_profile"] = profile_name
+            Config.save_raw(cfg_data)
+            self.agent.config.apply_profile(profile)
+            self.agent.reinit(self.agent.config)
+            await query.answer(f"Switched to {profile_name}")
+            # Refresh the profile list to update the active marker
+            buttons = []
+            for pname, praw in profiles.items():
+                marker = "\u2705 " if pname == profile_name else ""
+                model = praw.get("model", "?")
+                provider = praw.get("provider", "?")
+                label = f"{marker}{pname}: {model} ({provider})"
+                buttons.append([
+                    InlineKeyboardButton(label, callback_data=f"model:switch:{pname}")
+                ])
+            await query.edit_message_text(
+                "Profiles (tap to switch):",
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+
+        else:
+            await query.answer()
 
     async def _on_message(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle incoming text messages with live status updates."""
