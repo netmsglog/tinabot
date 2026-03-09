@@ -59,7 +59,10 @@ class WebServer:
         """Serve the chat UI HTML (no auth required - auth happens via WebSocket)."""
         html_path = Path(__file__).parent / "static" / "index.html"
         html = html_path.read_text(encoding="utf-8")
-        return web.Response(text=html, content_type="text/html")
+        return web.Response(
+            text=html, content_type="text/html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     async def _handle_download(self, request: web.Request) -> web.Response:
         """Serve a local file for download."""
@@ -299,6 +302,7 @@ class WebServer:
         events, has_more, next_offset = self._history.read_paginated(
             task_id, max_pairs=limit, before_index=before_index,
         )
+        logger.info(f"_send_history task={task_id} events={len(events)} has_more={has_more}")
         if not events:
             if before_index is not None:
                 # Explicit load-more with no results
@@ -567,7 +571,6 @@ class WebServer:
                 await ws.send_json({"type": "error", "message": f"Task '{args}' not found"})
 
         elif cmd == "history":
-            # Load more history (scroll up)
             task_id = self._session_tasks.get(session_id)
             if task_id:
                 try:
@@ -576,7 +579,10 @@ class WebServer:
                     params = {}
                 before = params.get("before")
                 limit = min(params.get("limit", 10), 50)
+                logger.info(f"history request task={task_id} before={before} limit={limit}")
                 await self._send_history(ws, task_id, limit=limit, before_index=before)
+            else:
+                logger.warning(f"history request but no task for session {session_id}")
 
         elif cmd == "rename":
             task_id = self._session_tasks.get(session_id)
