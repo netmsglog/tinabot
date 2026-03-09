@@ -38,8 +38,9 @@ class WebServer:
         self._session_tasks: dict[str, str] = {}
         # file_id -> file info
         self._uploaded_files: dict[str, dict] = {}
-        # ws_id -> running agent asyncio.Task for cancellation
-        self._processing: dict[str, asyncio.Task] = {}
+        # task_id -> (asyncio.Task, WebSocketResponse | None)
+        # Agent keeps running even if WS disconnects; WS is re-attached on reconnect
+        self._processing: dict[str, tuple[asyncio.Task, web.WebSocketResponse | None]] = {}
 
     def _check_token(self, request: web.Request) -> bool:
         """Validate auth token from header or query param."""
@@ -173,6 +174,8 @@ class WebServer:
 
         logger.info(f"WebSocket connected: {ws_id}")
 
+        # Keepalive heartbeat to prevent Cloudflare Tunnel idle timeout
+        keepalive = asyncio.create_task(self._keepalive_loop(ws))
         try:
             async for raw_msg in ws:
                 if raw_msg.type == web.WSMsgType.TEXT:
@@ -203,11 +206,23 @@ class WebServer:
                                     task = self.memory.get_or_create("default", "Default task")
 
                             self._session_tasks[session_id] = task.id
+
+                            # Re-attach WS if agent is still running for this task
+                            entry = self._processing.get(task.id)
+                            still_processing = False
+                            if entry:
+                                atask, _ = entry
+                                if not atask.done():
+                                    self._processing[task.id] = (atask, ws)
+                                    still_processing = True
+                                    logger.info(f"WS {ws_id} re-attached to running task {task.id}")
+
                             await ws.send_json({
                                 "type": "auth_ok",
                                 "session_id": session_id,
                                 "task_id": task.id,
                                 "task_name": task.name,
+                                "processing": still_processing,
                             })
                         else:
                             await ws.send_json({"type": "auth_error", "message": "Invalid token"})
@@ -235,10 +250,16 @@ class WebServer:
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
         finally:
-            # Cancel any in-flight processing
-            proc = self._processing.pop(ws_id, None)
-            if proc and not proc.done():
-                proc.cancel()
+            keepalive.cancel()
+            # Detach WS from any running task — but let the agent finish
+            task_id = self._session_tasks.get(session_id)
+            if task_id and task_id in self._processing:
+                atask, _ = self._processing[task_id]
+                if not atask.done():
+                    self._processing[task_id] = (atask, None)
+                    logger.info(f"WS {ws_id} detached from task {task_id} (agent continues)")
+                else:
+                    del self._processing[task_id]
             logger.info(f"WebSocket disconnected: {ws_id}")
 
         return ws
@@ -355,21 +376,24 @@ class WebServer:
         if not text:
             return
 
-        logger.info(f"WS {ws_id} message: {text[:80]!r}")
-
-        # Cancel previous processing for this ws
-        proc = self._processing.pop(ws_id, None)
-        if proc and not proc.done():
-            logger.info(f"WS {ws_id} cancelling previous processing")
-            proc.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(proc), timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-                pass
-
         task_id = self._get_or_create_task(session_id, text)
         task = self.memory.get_task(task_id)
-        logger.info(f"WS {ws_id} task={task_id} session={task.session_id if task else None} turns={task.turn_count if task else 0}")
+        logger.info(
+            f"WS {ws_id} message: {text[:80]!r} "
+            f"task={task_id} session={task.session_id if task else None} turns={task.turn_count if task else 0}"
+        )
+
+        # Cancel previous processing for this task
+        prev = self._processing.pop(task_id, None)
+        if prev:
+            atask, _ = prev
+            if not atask.done():
+                logger.info(f"WS {ws_id} cancelling previous agent for task {task_id}")
+                atask.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(atask), timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                    pass
 
         # Resolve file attachments
         images: list[ImageInput] = []
@@ -399,11 +423,11 @@ class WebServer:
 
         # Create agent processing task
         agent_task = asyncio.create_task(
-            self._process_and_stream(ws, ws_id, task, text, images)
+            self._process_and_stream(task_id, ws, ws_id, task, text, images)
         )
-        self._processing[ws_id] = agent_task
+        self._processing[task_id] = (agent_task, ws)
         agent_task.add_done_callback(
-            lambda _, wid=ws_id: self._processing.pop(wid, None)
+            lambda _, tid=task_id: self._processing.pop(tid, None)
         )
 
     async def _ws_send(self, ws: web.WebSocketResponse, msg: dict):
@@ -424,33 +448,50 @@ class WebServer:
         except asyncio.CancelledError:
             pass
 
+    def _get_task_ws(self, task_id: str) -> web.WebSocketResponse | None:
+        """Get the currently attached WebSocket for a task."""
+        entry = self._processing.get(task_id)
+        if entry:
+            _, ws = entry
+            return ws
+        return None
+
+    async def _task_send(self, task_id: str, msg: dict):
+        """Send to the currently attached WS for a task (if any)."""
+        ws = self._get_task_ws(task_id)
+        if ws:
+            await self._ws_send(ws, msg)
+
     async def _process_and_stream(
         self,
+        task_id: str,
         ws: web.WebSocketResponse,
         ws_id: str,
         task,
         text: str,
         images: list[ImageInput] | None,
     ):
-        """Run agent.process() and stream events to WebSocket."""
+        """Run agent.process() and stream events to WebSocket.
+
+        The agent keeps running even if the WS disconnects.  Streaming
+        callbacks use _task_send() which looks up the *current* WS, so
+        output is automatically routed to a reconnected client.
+        """
         import time as _time
         t0 = _time.monotonic()
 
         async def on_text(chunk: str):
-            await self._ws_send(ws, {"type": "text", "content": chunk})
+            await self._task_send(task_id, {"type": "text", "content": chunk})
 
         async def on_thinking(chunk: str):
-            await self._ws_send(ws, {"type": "thinking", "content": chunk})
+            await self._task_send(task_id, {"type": "thinking", "content": chunk})
 
         async def on_tool(name: str, input_data: dict):
             detail = _tool_detail(name, input_data)
-            logger.info(f"WS {ws_id} tool: {name} {detail[:80]}")
-            await self._ws_send(ws, {"type": "tool", "name": name, "detail": detail})
+            logger.info(f"task={task_id} tool: {name} {detail[:80]}")
+            await self._task_send(task_id, {"type": "tool", "name": name, "detail": detail})
 
-        # Start server-side keepalive to prevent Cloudflare idle timeout
-        keepalive = asyncio.create_task(self._keepalive_loop(ws))
-
-        logger.info(f"WS {ws_id} starting agent.process task={task.id}")
+        logger.info(f"task={task_id} starting agent.process")
         try:
             response = await self.agent.process(
                 message=text,
@@ -464,10 +505,10 @@ class WebServer:
 
             elapsed = _time.monotonic() - t0
             logger.info(
-                f"WS {ws_id} done in {elapsed:.1f}s — "
+                f"task={task_id} done in {elapsed:.1f}s — "
                 f"in:{response.input_tokens} out:{response.output_tokens} "
                 f"cost:${response.cost_usd:.4f}" if response.cost_usd else
-                f"WS {ws_id} done in {elapsed:.1f}s — "
+                f"task={task_id} done in {elapsed:.1f}s — "
                 f"in:{response.input_tokens} out:{response.output_tokens}"
             )
 
@@ -480,19 +521,17 @@ class WebServer:
                 done_msg["cost_usd"] = response.cost_usd
             if response.num_turns:
                 done_msg["num_turns"] = response.num_turns
-            await self._ws_send(ws, done_msg)
+            await self._task_send(task_id, done_msg)
 
         except asyncio.CancelledError:
             elapsed = _time.monotonic() - t0
-            logger.warning(f"WS {ws_id} cancelled after {elapsed:.1f}s")
-            await self._ws_send(ws, {"type": "error", "message": "Interrupted"})
+            logger.warning(f"task={task_id} cancelled after {elapsed:.1f}s")
+            await self._task_send(task_id, {"type": "error", "message": "Interrupted"})
             raise
         except Exception as e:
             elapsed = _time.monotonic() - t0
-            logger.error(f"WS {ws_id} agent error after {elapsed:.1f}s: {e}")
-            await self._ws_send(ws, {"type": "error", "message": str(e)})
-        finally:
-            keepalive.cancel()
+            logger.error(f"task={task_id} agent error after {elapsed:.1f}s: {e}")
+            await self._task_send(task_id, {"type": "error", "message": str(e)})
 
     async def _handle_command(
         self, ws: web.WebSocketResponse, session_id: str, msg: dict
@@ -661,9 +700,9 @@ class WebServer:
     async def stop(self):
         """Stop the web server."""
         # Cancel all in-flight processing
-        for proc in self._processing.values():
-            if not proc.done():
-                proc.cancel()
+        for atask, _ in self._processing.values():
+            if not atask.done():
+                atask.cancel()
         self._processing.clear()
 
         if self._runner:
