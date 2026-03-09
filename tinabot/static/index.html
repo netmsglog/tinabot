@@ -513,12 +513,16 @@ let pingInterval = null;
 let reconnectTimer = null;
 let isReconnect = false;
 
+let wsGeneration = 0;  // monotonic counter to discard stale onclose handlers
+
 function connectWS(t) {
   // Clean up any previous connection
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   clearInterval(pingInterval);
   pingInterval = null;
+  wsGeneration++;
+  const gen = wsGeneration;
   if (ws) {
     ws.onclose = null;
     ws.onerror = null;
@@ -552,12 +556,10 @@ function connectWS(t) {
   ws.onclose = () => {
     clearInterval(pingInterval);
     pingInterval = null;
-    if (sessionId) {
-      updateConnectionStatus(false);
-    }
-    // Always attempt reconnect if we have a token (handles pre-auth failures too)
+    // Ignore if a newer connection has been created (avoids stale reconnect loops)
+    if (gen !== wsGeneration) return;
+    updateConnectionStatus(false);
     if (token) {
-      updateConnectionStatus(false);
       scheduleReconnect(t);
     }
   };
@@ -575,13 +577,22 @@ function scheduleReconnect(t) {
   reconnectDelay = Math.min(reconnectDelay * 2, 30000);
 }
 
-// Mobile browsers kill WebSocket connections when the page goes to background.
-// Always force-reconnect when the page becomes visible again.
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !sessionId) return;
+// Reconnect when page becomes visible again (mobile background/foreground)
+// or when restored from bfcache (browser back from file download).
+function handlePageResume() {
+  if (!token) return;
   isReconnect = true;
   reconnectDelay = 1000;
   connectWS(token);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') handlePageResume();
+});
+
+// bfcache restore: visibilitychange may NOT fire, but pageshow always does
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) handlePageResume();
 });
 
 function updateConnectionStatus(connected) {
