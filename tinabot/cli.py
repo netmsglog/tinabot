@@ -324,6 +324,8 @@ def chat():
 @app_cli.command()
 def serve():
     """Start Telegram bot (and web server if configured)."""
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     config = Config.load()
     if not config.telegram.token:
         console.print(
@@ -339,6 +341,8 @@ def serve():
 @app_cli.command()
 def web():
     """Start web chat interface."""
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     config = Config.load()
     if not config.web.auth_token:
         console.print(
