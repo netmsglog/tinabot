@@ -79,6 +79,19 @@ class TaskMemory:
         logger.info(f"Created task {task_id}: {name[:50]}")
         return task
 
+    def get_or_create(self, task_id: str, name: str) -> Task:
+        """Get an existing task by ID, or create one with that specific ID."""
+        existing = self._tasks.get(task_id)
+        if existing:
+            return existing
+        task = Task(id=task_id, name=name[:80], active=True)
+        for t in self._tasks.values():
+            t.active = False
+        self._tasks[task_id] = task
+        self._save()
+        logger.info(f"Created task {task_id}: {name[:50]}")
+        return task
+
     def get_task(self, task_id: str) -> Task | None:
         """Get a task by ID."""
         return self._tasks.get(task_id)

@@ -76,6 +76,67 @@ class HistoryLogger:
                     pass
         return events
 
+    def read_paginated(
+        self, task_id: str, max_pairs: int = 10, before_index: int | None = None,
+    ) -> tuple[list[dict], bool, int | None]:
+        """Read recent conversation pairs with pagination.
+
+        A "pair" is a user_message followed by its tool_calls and response.
+
+        Args:
+            task_id: Task to read.
+            max_pairs: Max conversation pairs to return.
+            before_index: If set, return pairs whose first event index < this value.
+
+        Returns:
+            (events, has_more, next_offset) where next_offset can be passed
+            as before_index in subsequent calls to load older pairs.
+        """
+        all_events = self.read(task_id)
+        if not all_events:
+            return [], False, None
+
+        # Group events into conversation pairs, tracking their start indices
+        pairs: list[tuple[int, list[dict]]] = []  # (start_index, events)
+        current_pair: list[dict] = []
+        current_start = 0
+
+        for i, ev in enumerate(all_events):
+            kind = ev.get("event", "")
+            if kind == "user_message":
+                if current_pair:
+                    pairs.append((current_start, current_pair))
+                current_pair = [ev]
+                current_start = i
+            elif kind in ("tool_call", "response"):
+                current_pair.append(ev)
+            # skip system_prompt etc.
+
+        if current_pair:
+            pairs.append((current_start, current_pair))
+
+        if not pairs:
+            return [], False, None
+
+        # Filter by before_index
+        if before_index is not None:
+            pairs = [(si, evs) for si, evs in pairs if si < before_index]
+
+        if not pairs:
+            return [], False, None
+
+        # Take last max_pairs
+        has_more = len(pairs) > max_pairs
+        selected = pairs[-max_pairs:]
+
+        # Flatten selected pairs back to event list
+        result: list[dict] = []
+        for _, evs in selected:
+            result.extend(evs)
+
+        next_offset = selected[0][0] if has_more else None
+        return result, has_more, next_offset
+
     def format_export(self, task_id: str, task_name: str = "") -> str | None:
         """Format task history as human-readable text.
 

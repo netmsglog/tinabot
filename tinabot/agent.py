@@ -3,12 +3,94 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
+import subprocess as _subprocess
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from loguru import logger
+
+
+# ---------------------------------------------------------------------------
+# Process management: track and clean up child/orphaned processes
+# ---------------------------------------------------------------------------
+
+_MY_PID = os.getpid()
+
+
+def _snapshot_user_pids() -> set[int]:
+    """Snapshot all PIDs owned by the current user."""
+    try:
+        result = _subprocess.run(
+            ["ps", "-o", "pid=", "-U", str(os.getuid())],
+            capture_output=True, text=True, timeout=5,
+        )
+        return {
+            int(line)
+            for line in result.stdout.split()
+            if line.strip().isdigit()
+        }
+    except Exception:
+        return set()
+
+
+def _cleanup_orphaned_processes(before_pids: set[int]):
+    """Kill user-owned processes that appeared during an agent call and are
+    now orphaned (PPID = 1, meaning their parent — the claude subprocess —
+    has exited and they were reparented to launchd/init)."""
+    after_pids = _snapshot_user_pids()
+    new_pids = after_pids - before_pids - {_MY_PID}
+
+    for pid in new_pids:
+        try:
+            result = _subprocess.run(
+                ["ps", "-o", "ppid=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=5,
+            )
+            ppid_str = result.stdout.strip()
+            if ppid_str and int(ppid_str) == 1:
+                logger.info(f"Killing orphaned agent process: pid={pid}")
+                os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+
+def kill_descendants(pid: int | None = None):
+    """Kill all descendant processes of *pid* (default: current process).
+    Called on application shutdown to avoid leaving stale processes."""
+    root = pid or _MY_PID
+
+    def _children(p: int) -> set[int]:
+        try:
+            r = _subprocess.run(
+                ["pgrep", "-P", str(p)],
+                capture_output=True, text=True, timeout=5,
+            )
+            return {int(l) for l in r.stdout.split() if l.strip().isdigit()}
+        except Exception:
+            return set()
+
+    # BFS to collect entire subtree
+    queue = [root]
+    all_desc: set[int] = set()
+    while queue:
+        parent = queue.pop(0)
+        kids = _children(parent) - all_desc
+        all_desc |= kids
+        queue.extend(kids)
+
+    # Kill leaves first (reverse sorted by PID as rough heuristic)
+    for p in sorted(all_desc, reverse=True):
+        try:
+            os.kill(p, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    if all_desc:
+        logger.info(f"Killed {len(all_desc)} descendant process(es)")
 
 from tinabot.config import AgentConfig
 from tinabot.history import HistoryLogger
@@ -33,6 +115,12 @@ Be direct, concise, and action-oriented.
 - **Respond in the user's language**: If the user writes in Chinese, respond in Chinese.
 - **Image analysis**: When you receive an image, analyze it directly from the visual content.
 - **Apple Notes**: Use `osascript -e 'tell application "Notes" to ...'` via Bash.
+
+## File Output
+- **ALL generated files** (PDFs, images, documents, temp files, etc.) MUST be saved \
+in the current working directory or a subdirectory of it. NEVER save to ~/Desktop, \
+~/Downloads, /tmp, or any other location outside the working directory.
+- Use relative paths or subdirectories (e.g. `./output/report.pdf`, `./chart.png`).
 
 When you have skills available, use them to guide your approach. \
 You can read skill files for detailed instructions when needed.
@@ -112,6 +200,37 @@ For created_at, use the actual timestamp string from `date`, NOT a shell command
 To delete a schedule, delete the file. To list schedules, read ~/.tinabot/data/schedules/.
 Always confirm to the user what was created and when it will trigger.
 """
+
+WEB_FILE_PROMPT = """\
+## File Sharing — CRITICAL RULES
+
+The user is on the web interface which has a BUILT-IN file download system.
+
+When you generate files (PDF, images, documents, etc.):
+1. Save the file in the current working directory (or a subdirectory)
+2. Tell the user the FULL ABSOLUTE file path — it becomes a clickable download link automatically
+3. Example: save to ./report.pdf, then say "文件已保存到 /Users/yu2/.tinabot/workspace/report.pdf"
+
+⛔ ABSOLUTELY DO NOT:
+- Save files to ~/Desktop, ~/Downloads, /tmp, or anywhere outside the working directory
+- Start any HTTP server (python -m http.server, python3 http.server, SimpleHTTPServer, etc.)
+- Give the user http://localhost or http://192.168.x.x URLs
+- Use `open` command to open files locally
+
+The web interface converts file paths like /Users/.../file.pdf into download links. \
+Any HTTP server you start is USELESS because the user cannot access your local network ports.
+"""
+
+# Short inline instruction prepended to user messages in web mode.
+# This ensures the rule is visible even when resuming an old session
+# (where the system prompt is baked into the original session).
+WEB_FILE_INSTRUCTION = (
+    "[System: User is on web interface. When generating files, "
+    "save in the current working directory (NOT Desktop/Downloads/tmp), "
+    "then mention the full absolute path — it auto-becomes a download link. "
+    "Do NOT start http.server or give http:// URLs. "
+    "Do NOT use the `open` command.]\n\n"
+)
 
 COMPRESSION_PROMPT = """\
 Summarize our conversation so far, capturing:
@@ -229,6 +348,10 @@ class TinaAgent:
         self.memory = task_memory
         self._history = HistoryLogger(task_memory.data_dir)
 
+        # Configure tool API keys
+        from tinabot.tools import configure_tools
+        configure_tools(tavily_api_key=config.tavily_api_key)
+
         # Lazy-init for non-Claude providers
         self._openai_agent = None
         self._message_store = None
@@ -283,11 +406,15 @@ class TinaAgent:
         self._openai_auth = None
         self._use_codex = False
 
+        # Reconfigure tool API keys
+        from tinabot.tools import configure_tools
+        configure_tools(tavily_api_key=config.tavily_api_key)
+
         if not config.is_claude:
             self._init_openai(config)
 
     def _build_system_prompt(
-        self, task: Task, chat_id: int | None = None
+        self, task: Task, chat_id: int | None = None, web_mode: bool = False,
     ) -> str:
         """Build the full system prompt with identity, skills, and task context."""
         identity = IDENTITY_PROMPT if self.config.is_claude else IDENTITY_PROMPT_OPENAI
@@ -301,6 +428,10 @@ class TinaAgent:
         # Add scheduling instructions when chat_id is available
         if chat_id is not None:
             parts.append(SCHEDULING_PROMPT_TEMPLATE.format(chat_id=chat_id))
+
+        # Add web file sharing instructions
+        if web_mode:
+            parts.append(WEB_FILE_PROMPT)
 
         # When session can't be resumed (compressed or lost), inject context
         if not (task.session_id and task.summary is None):
@@ -335,6 +466,7 @@ class TinaAgent:
         task: Task,
         chat_id: int | None = None,
         no_thinking: bool = False,
+        web_mode: bool = False,
     ):
         """Build SDK options for a Claude query."""
         from claude_agent_sdk import ClaudeAgentOptions
@@ -345,7 +477,7 @@ class TinaAgent:
             if tool not in all_tools:
                 all_tools.append(tool)
 
-        system_prompt = self._build_system_prompt(task, chat_id=chat_id)
+        system_prompt = self._build_system_prompt(task, chat_id=chat_id, web_mode=web_mode)
 
         # Determine resume behavior
         resume = None
@@ -422,6 +554,7 @@ class TinaAgent:
         chat_id: int | None = None,
         images: list[ImageInput] | None = None,
         no_thinking: bool = False,
+        web_mode: bool = False,
     ) -> AgentResponse:
         """Process a user message through the agent.
 
@@ -433,6 +566,7 @@ class TinaAgent:
             on_tool: Callback for tool use events (name, input).
             chat_id: Telegram chat ID (enables scheduling instructions).
             images: Optional list of images to include in the message.
+            web_mode: If True, inject web file sharing instructions.
 
         Returns:
             AgentResponse with text, session info, and cost.
@@ -447,6 +581,12 @@ class TinaAgent:
         if task.turn_count == 0 and task.name in ("New task", "Default task"):
             self.memory.rename_task(task.id, message[:80])
             task.name = message[:80]
+
+        # In web mode, prepend file-sharing rules directly into the user
+        # message so they are visible even when resuming an old session
+        # (resumed sessions ignore the new system_prompt).
+        if web_mode:
+            message = WEB_FILE_INSTRUCTION + message
 
         # Log user message
         self._history.log(
@@ -464,19 +604,54 @@ class TinaAgent:
                 if hasattr(result, "__await__"):
                     await result
 
+        # Snapshot PIDs before agent call for orphan cleanup
+        before_pids = _snapshot_user_pids()
+
         # Route non-Claude providers to OpenAI agent
         if not self.config.is_claude:
-            return await self._process_openai(
+            try:
+                return await self._process_openai(
+                    message=message,
+                    task=task,
+                    on_text=on_text,
+                    on_thinking=on_thinking,
+                    on_tool=_logging_on_tool,
+                    chat_id=chat_id,
+                    images=images,
+                    web_mode=web_mode,
+                )
+            finally:
+                _cleanup_orphaned_processes(before_pids)
+
+        try:
+            return await self._process_claude(
                 message=message,
                 task=task,
                 on_text=on_text,
-                on_thinking=on_thinking,
                 on_tool=_logging_on_tool,
+                on_thinking=on_thinking,
                 chat_id=chat_id,
                 images=images,
+                no_thinking=no_thinking,
+                web_mode=web_mode,
             )
+        finally:
+            _cleanup_orphaned_processes(before_pids)
 
-        options = self._build_options(task, chat_id=chat_id, no_thinking=no_thinking)
+    async def _process_claude(
+        self,
+        message: str,
+        task: Task,
+        on_text: OnText | None,
+        on_tool: OnTool | None,
+        on_thinking: OnThinking | None,
+        chat_id: int | None,
+        images: list[ImageInput] | None,
+        no_thinking: bool,
+        web_mode: bool,
+    ) -> AgentResponse:
+        """Process a message via Claude SDK."""
+        options = self._build_options(task, chat_id=chat_id, no_thinking=no_thinking, web_mode=web_mode)
         logger.info(
             f"process task={task.id} session={task.session_id} "
             f"resume={'yes' if options.resume else 'no'} "
@@ -539,7 +714,8 @@ class TinaAgent:
 
                             elif isinstance(block, ToolUseBlock):
                                 response.tool_uses.append(block.name)
-                                await _logging_on_tool(block.name, block.input)
+                                if on_tool:
+                                    await on_tool(block.name, block.input)
 
                     elif isinstance(msg, ResultMessage):
                         response.session_id = msg.session_id
@@ -619,9 +795,10 @@ class TinaAgent:
         on_tool: OnTool | None = None,
         chat_id: int | None = None,
         images: list[ImageInput] | None = None,
+        web_mode: bool = False,
     ) -> AgentResponse:
         """Process a message via OpenAI-compatible provider."""
-        system_prompt = self._build_system_prompt(task, chat_id=chat_id)
+        system_prompt = self._build_system_prompt(task, chat_id=chat_id, web_mode=web_mode)
         self._history.log(task.id, "system_prompt", text=system_prompt)
 
         mode = "codex" if self._use_codex else "api"

@@ -2,13 +2,13 @@
 
 [中文文档](#tinabot-中文)
 
-A local AI agent built on Claude Agent SDK with minimal Python code, replacing OpenClaw with a Claude Code/Codex-like experience, supporting both CLI and Telegram interfaces.
+A local AI agent built on Claude Agent SDK with minimal Python code, replacing OpenClaw with a Claude Code/Codex-like experience, supporting CLI, Telegram, and Web interfaces.
 
 ## Why Tinabot?
 
-As a heavy user of Claude Code and Codex, I often ran into long-running tasks with OpenClaw where token costs piled up with no visibility into what the agent was doing and no way to intervene. Tinabot was built as a clean, customizable OpenClaw replacement — **adding an IM interface** to the core of Claude Code/Codex so you can remotely control it via Telegram anytime.
+As a heavy user of Claude Code and Codex, I often ran into long-running tasks with OpenClaw where token costs piled up with no visibility into what the agent was doing and no way to intervene. Tinabot was built as a clean, customizable OpenClaw replacement — **adding an IM interface** to the core of Claude Code/Codex so you can remotely control it via Telegram or Web anytime.
 
-- **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI and Telegram, so you always know what the agent is doing and for how long
+- **Full visibility** — Every tool call (file reads, commands, searches) shown in real-time in CLI, Telegram, and Web, so you always know what the agent is doing and for how long
 - **Transparent token costs** — Each interaction shows input/output tokens and cost estimate (`↑5.2k ⚡40k ↓1.1k · $0.0534`)
 - **Interruptible anytime** — Send a new message in Telegram to interrupt instantly, Ctrl+C in CLI — conversation context is preserved after interruption
 - **Reuse existing skills** — Compatible with Claude Code / Codex / OpenClaw `SKILL.md` skill format, reuses `~/.agents/skills/` directly
@@ -20,10 +20,12 @@ As a heavy user of Claude Code and Codex, I often ran into long-running tasks wi
 
 - **Per-Task Memory** — Each conversation is a "task" with cross-message context, auto-compressed when turns exceed limit
 - **Interaction History** — Every user message, tool call, and response is logged per-task as JSONL for full replay and analysis (`tina history export <id>`)
+- **Web Chat Interface** — Mobile-friendly web UI with real-time streaming, file downloads, URL-based task routing, and paginated history
 - **Skills System** — Loads from `~/.agents/skills/*/SKILL.md`, small skills inlined, large skills loaded on demand
 - **Scheduled Tasks** — Create from natural language (e.g. "search reddit daily at 9am"), cron-based background execution with Telegram delivery
 - **Voice & Photos** — Telegram voice auto-transcription (Groq Whisper), multimodal image recognition + local file access
-- **Full Tool Access** — Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, Task
+- **Full Tool Access** — Read, Write, Edit, Bash, Glob, Grep, WebSearch (Tavily), WebFetch, Task
+- **Workspace Isolation** — All agent-generated files are saved in `~/.tinabot/workspace/`, never to Desktop or other locations
 
 ## Quick Start
 
@@ -66,7 +68,8 @@ Edit `~/.tinabot/config.json`:
     }
   },
   "agent": { ... },
-  "telegram": { ... }
+  "telegram": { ... },
+  "web": { ... }
 }
 ```
 
@@ -157,13 +160,15 @@ The `agent` section holds execution parameters independent of profiles:
 | `cwd` | Agent working directory (default `~/.tinabot/workspace`) |
 | `max_tokens` | Max output tokens for non-Claude models |
 | `timeout_seconds` | Per-call timeout in seconds (default 3600) |
+| `tavily_api_key` | Tavily API key for WebSearch tool (optional) |
 
 ## CLI Usage
 
 ```
 tina                # Interactive REPL (default)
 tina chat           # Same as above
-tina serve          # Start Telegram bot
+tina serve          # Start Telegram bot (+ web server if configured)
+tina web            # Start web chat interface only
 tina tasks          # List all tasks
 tina skills         # List loaded skills
 
@@ -211,6 +216,60 @@ REPL commands:
 | `/skills` | List loaded skills |
 | `/help` | Show help |
 | `/exit` | Quit |
+
+## Web Chat Interface
+
+A mobile-friendly web UI for chatting with Tina from any device — phone, tablet, or browser.
+
+### Setup
+
+Add to `~/.tinabot/config.json`:
+
+```json
+{
+  "web": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "auth_token": "your-secret-token"
+  }
+}
+```
+
+Start the web server:
+
+```bash
+tina web             # Web server only
+tina serve           # Telegram + web server together
+```
+
+Access: `http://<your-ip>:8080/?token=your-secret-token`
+
+The token is saved in the browser after first use — subsequent visits don't need it in the URL.
+
+### Features
+
+- **Real-time streaming** — Text, thinking, and tool calls streamed via WebSocket
+- **URL-based task routing** — `/` for default task, `/t/{task_id}` for specific tasks; browser back/forward works
+- **Paginated history** — Last 10 conversation pairs loaded on connect; scroll up to load more
+- **File downloads** — Agent-generated files (PDFs, images, etc.) appear as clickable download links
+- **File uploads** — Upload images and documents directly in the chat
+- **Model switching** — Switch profiles via the command menu
+- **Mobile-optimized** — Works on iOS Safari and Android Chrome with automatic WebSocket reconnection
+- **Cloudflare Tunnel compatible** — Built-in keepalive heartbeat prevents idle timeout
+
+### Web Commands
+
+Available via the menu button (☰):
+
+| Command | Description |
+|---|---|
+| New task | Create a new task |
+| Tasks | List and switch tasks |
+| Rename | Rename current task |
+| Delete | Delete current task |
+| Models | Switch model profile |
+| Compress | Compress current task context |
 
 ## Telegram Bot
 
@@ -330,13 +389,13 @@ Instructions for the agent...
 
 # Tinabot (中文)
 
-基于 Claude Agent SDK 的本地 AI Agent，极简Python代码，平替openclaw功能，接近claude code/codex的使用体验，支持 CLI 和 Telegram 双接口。
+基于 Claude Agent SDK 的本地 AI Agent，极简Python代码，平替openclaw功能，接近claude code/codex的使用体验，支持 CLI、Telegram 和 Web 三种接口。
 
 ## Why Tinabot?
 
-作为 Claude Code 和 Codex 的重度用户，在使用openclaw过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么，又无法干预的情况。Tinabot 的初衷是做一个代码干净、可定制的openclaw平替，给cc/codex的内核**加一个 IM 界面**，通过 Telegram 随时远程操控。
+作为 Claude Code 和 Codex 的重度用户，在使用openclaw过程中，经常遇到任务执行耗时很长、token 消耗很多，但又不知道在做什么，又无法干预的情况。Tinabot 的初衷是做一个代码干净、可定制的openclaw平替，给cc/codex的内核**加一个 IM 界面**，通过 Telegram 或 Web 随时远程操控。
 
-- **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI 和 Telegram 中，清楚知道 Agent 在做什么、做了多久
+- **全程可视** — 每一步工具调用（读文件、执行命令、搜索）都实时展示在 CLI、Telegram 和 Web 中，清楚知道 Agent 在做什么、做了多久
 - **Token 消耗透明** — 每次交互显示输入/输出 token 数和费用估算（`↑5.2k ⚡40k ↓1.1k · $0.0534`），不再为账单焦虑
 - **随时可中断** — 在 Telegram 中发送新消息立即中断当前任务，CLI 中 Ctrl+C 随时退出，不会卡住，中断后仍然保持对话上下文
 - **复用现有技能库** — 兼容 Claude Code / Codex / OpenClaw 的 `SKILL.md` 技能文件格式，直接复用 `~/.agents/skills/` 目录下的技能，无需迁移
@@ -349,10 +408,12 @@ Instructions for the agent...
 
 - **按任务记忆** — 每个对话是独立的"任务"，跨消息保持上下文，超过设定轮次自动压缩
 - **交互历史** — 每个任务的用户消息、工具调用、响应全部按时间顺序记录为 JSONL，支持完整回溯（`tina history export <id>`）
+- **Web 聊天界面** — 移动端友好的 Web UI，实时流式输出、文件下载、URL 路由切换任务、分页加载历史
 - **技能系统** — 从 `~/.agents/skills/*/SKILL.md` 加载，小技能内联 system prompt，大技能按需加载
 - **定时任务** — 用自然语言创建（如"每天9点搜reddit发给我"），后台 cron 调度器自动执行并发送到 Telegram
 - **语音 & 图片** — Telegram 语音消息自动转写（Groq Whisper），图片多模态识别+本地文件操作
-- **完整工具集** — Read、Write、Edit、Bash、Glob、Grep、WebSearch、WebFetch、Task
+- **完整工具集** — Read、Write、Edit、Bash、Glob、Grep、WebSearch (Tavily)、WebFetch、Task
+- **工作空间隔离** — Agent 生成的所有文件都保存在 `~/.tinabot/workspace/`，不会散落到桌面等位置
 
 ## 快速开始
 
@@ -396,7 +457,8 @@ Tinabot 使用 **Profile（配置档）** 管理模型。每个 Profile 是一�
     }
   },
   "agent": { ... },
-  "telegram": { ... }
+  "telegram": { ... },
+  "web": { ... }
 }
 ```
 
@@ -487,13 +549,15 @@ REPL 内：`/models` 列出、`/model openai` 切换（即时生效）。
 | `cwd` | Agent 工作目录（默认 `~/.tinabot/workspace`） |
 | `max_tokens` | 非 Claude 模型的最大输出 token 数 |
 | `timeout_seconds` | 单次 Agent 调用超时秒数（默认 3600） |
+| `tavily_api_key` | Tavily API 密钥，用于 WebSearch 工具（可选） |
 
 ## CLI 使用
 
 ```
 tina                # 交互式 REPL（默认）
 tina chat           # 同上
-tina serve          # 启动 Telegram 机器人
+tina serve          # 启动 Telegram 机器人（+ Web 服务器如已配置）
+tina web            # 仅启动 Web 聊天界面
 tina tasks          # 列出所有任务
 tina skills         # 列出已加载的技能
 
@@ -541,6 +605,60 @@ REPL 命令：
 | `/skills` | 列出已加载技能 |
 | `/help` | 显示帮助 |
 | `/exit` | 退出 |
+
+## Web 聊天界面
+
+移动端友好的 Web UI，支持从手机、平板或浏览器与 Tina 对话。
+
+### 配置
+
+在 `~/.tinabot/config.json` 中添加：
+
+```json
+{
+  "web": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "auth_token": "你的密钥"
+  }
+}
+```
+
+启动 Web 服务器：
+
+```bash
+tina web             # 仅 Web 服务器
+tina serve           # Telegram + Web 同时启动
+```
+
+访问：`http://<你的IP>:8080/?token=你的密钥`
+
+首次使用后 token 会保存在浏览器中，之后访问无需再在 URL 中带 token。
+
+### 功能特性
+
+- **实时流式输出** — 文本、思考过程、工具调用通过 WebSocket 实时推送
+- **URL 路由** — `/` 为默认任务，`/t/{task_id}` 为指定任务；浏览器前进/后退可用
+- **分页历史** — 连接时加载最近 10 组对话；向上滚动加载更多
+- **文件下载** — Agent 生成的文件（PDF、图片等）自动显示为可点击的下载链接
+- **文件上传** — 直接在聊天中上传图片和文档
+- **模型切换** — 通过菜单切换 Profile
+- **移动端优化** — 支持 iOS Safari 和 Android Chrome，自动重连
+- **Cloudflare Tunnel 兼容** — 内置心跳机制防止空闲超时
+
+### Web 命令
+
+通过菜单按钮（☰）使用：
+
+| 命令 | 说明 |
+|---|---|
+| New task | 创建新任务 |
+| Tasks | 列出并切换任务 |
+| Rename | 重命名当前任务 |
+| Delete | 删除当前任务 |
+| Models | 切换模型 Profile |
+| Compress | 压缩当前任务上下文 |
 
 ## Telegram 机器人
 
@@ -654,4 +772,4 @@ always: true
 ## 依赖
 
 - Python 3.10+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)（`npm install -g @anthropic-ai/claude-code`）— 仅 Claude provider 需要
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`) — 仅 Claude provider 需要

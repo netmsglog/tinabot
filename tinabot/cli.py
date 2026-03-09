@@ -323,7 +323,7 @@ def chat():
 
 @app_cli.command()
 def serve():
-    """Start Telegram bot."""
+    """Start Telegram bot (and web server if configured)."""
     config = Config.load()
     if not config.telegram.token:
         console.print(
@@ -334,6 +334,24 @@ def serve():
     config.telegram.enabled = True
     tina = TinaApp(config)
     asyncio.run(tina.run_serve())
+
+
+@app_cli.command()
+def web():
+    """Start web chat interface."""
+    config = Config.load()
+    if not config.web.auth_token:
+        console.print(
+            "Set web.auth_token in ~/.tinabot/config.json",
+            style="red",
+        )
+        raise typer.Exit(1)
+    config.web.enabled = True
+    tina = TinaApp(config)
+    host = config.web.host
+    port = config.web.port
+    console.print(f"Starting web server at http://{host}:{port}", style="green")
+    asyncio.run(tina.run_web())
 
 
 @app_cli.command()

@@ -1,6 +1,6 @@
 """Tool schemas and executors for OpenAI-compatible providers.
 
-Provides tools (Bash, Read, Write, Glob, Grep, WebFetch) with:
+Provides tools (Bash, Read, Write, Glob, Grep, WebFetch, WebSearch) with:
 - OpenAI function-calling JSON schemas
 - Async executor functions
 """
@@ -8,11 +8,21 @@ Provides tools (Bash, Read, Write, Glob, Grep, WebFetch) with:
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import shutil
 from pathlib import Path
 
 import httpx
 from loguru import logger
+
+# Module-level config set via configure_tools()
+_TOOL_CONFIG: dict[str, str] = {}
+
+
+def configure_tools(*, tavily_api_key: str = ""):
+    """Set API keys and config for tools that need external services."""
+    if tavily_api_key:
+        _TOOL_CONFIG["tavily_api_key"] = tavily_api_key
 
 # ---------------------------------------------------------------------------
 # Tool schemas (OpenAI function calling format)
@@ -167,6 +177,39 @@ TOOL_SCHEMAS: dict[str, dict] = {
                     },
                 },
                 "required": ["url"],
+            },
+        },
+    },
+    "WebSearch": {
+        "type": "function",
+        "function": {
+            "name": "WebSearch",
+            "description": (
+                "Search the web using Tavily. Returns relevant results with "
+                "titles, URLs, and content snippets. Use for finding current "
+                "information, news, documentation, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query.",
+                    },
+                    "search_depth": {
+                        "type": "string",
+                        "enum": ["basic", "advanced"],
+                        "description": (
+                            "Search depth: 'basic' for quick results, "
+                            "'advanced' for more thorough search. Default: basic."
+                        ),
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Max number of results to return (default 5, max 20).",
+                    },
+                },
+                "required": ["query"],
             },
         },
     },
@@ -376,6 +419,66 @@ async def _exec_webfetch(args: dict, cwd: str) -> str:
         return f"Error fetching URL: {e}"
 
 
+async def _exec_websearch(args: dict, cwd: str) -> str:
+    query = args.get("query", "")
+    if not query:
+        return "Error: no query provided."
+
+    api_key = _TOOL_CONFIG.get("tavily_api_key", "")
+    if not api_key:
+        return "Error: Tavily API key not configured. Set agent.tavily_api_key in config."
+
+    search_depth = args.get("search_depth", "basic")
+    max_results = min(args.get("max_results", 5), 20)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": query,
+                    "search_depth": search_depth,
+                    "max_results": max_results,
+                    "include_answer": True,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        parts: list[str] = []
+
+        # Include Tavily's generated answer if available
+        answer = data.get("answer")
+        if answer:
+            parts.append(f"Answer: {answer}\n")
+
+        results = data.get("results", [])
+        if not results:
+            return "No results found."
+
+        for i, r in enumerate(results, 1):
+            title = r.get("title", "")
+            url = r.get("url", "")
+            content = r.get("content", "")
+            score = r.get("score", 0)
+            parts.append(
+                f"[{i}] {title}\n"
+                f"    URL: {url}\n"
+                f"    Score: {score:.2f}\n"
+                f"    {content}\n"
+            )
+
+        result = "\n".join(parts)
+        if len(result) > MAX_OUTPUT:
+            result = result[:MAX_OUTPUT] + f"\n... (truncated at {MAX_OUTPUT} chars)"
+        return result
+    except httpx.HTTPStatusError as e:
+        return f"Tavily API error: {e.response.status_code} {e.response.text[:200]}"
+    except Exception as e:
+        return f"Error searching: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -387,6 +490,7 @@ _EXECUTORS = {
     "Glob": _exec_glob,
     "Grep": _exec_grep,
     "WebFetch": _exec_webfetch,
+    "WebSearch": _exec_websearch,
 }
 
 

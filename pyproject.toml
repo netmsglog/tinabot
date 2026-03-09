@@ -22,6 +22,7 @@ dependencies = [
     "groq>=0.9",
     "openai>=1.50",
     "httpx>=0.24",
+    "aiohttp>=3.9",
 ]
 
 [project.scripts]

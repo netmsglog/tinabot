@@ -36,6 +36,9 @@ class AgentConfig(BaseModel):
     output_price: float = 25.0  # $/MTok
     cache_read_price: float = 0.5  # $/MTok
 
+    # Tool API keys
+    tavily_api_key: str = ""  # Tavily API key for WebSearch tool
+
     # Execution settings
     max_thinking_tokens: int = 10000
     permission_mode: str = "acceptEdits"
@@ -80,6 +83,15 @@ class TelegramConfig(BaseModel):
     groq_api_key: str = ""  # For voice transcription (Whisper via Groq)
 
 
+class WebConfig(BaseModel):
+    """Web chat interface settings."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    auth_token: str = ""  # Required for access; empty = deny all
+
+
 class MemoryConfig(BaseModel):
     """Task memory settings."""
 
@@ -110,6 +122,7 @@ class Config(BaseSettings):
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
 

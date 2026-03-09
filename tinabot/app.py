@@ -6,7 +6,7 @@ import asyncio
 
 from loguru import logger
 
-from tinabot.agent import TinaAgent
+from tinabot.agent import TinaAgent, kill_descendants
 from tinabot.config import Config
 from tinabot.memory import TaskMemory
 from tinabot.scheduler import Scheduler, ScheduleStore
@@ -28,27 +28,57 @@ class TinaApp:
         self.schedule_store = ScheduleStore(config.memory.data_dir)
 
     async def run_serve(self):
-        """Start the Telegram bot and scheduler."""
-        bot = TelegramBot(
-            self.config.telegram, self.agent, self.memory, self.schedule_store
-        )
-        scheduler = Scheduler(self.store, self.agent, bot.send_message)
-        scheduler_task: asyncio.Task | None = None
-        logger.info("Starting Telegram serve mode...")
+        """Start the Telegram bot, web server, and scheduler."""
+        bg_tasks: list[asyncio.Task] = []
+        bot: TelegramBot | None = None
+        web_server = None
+
         try:
-            # Start scheduler as background task
-            scheduler_task = asyncio.create_task(scheduler.run())
+            # Start web server if configured
+            if self.config.web.enabled and self.config.web.auth_token:
+                from tinabot.web import WebServer
+                web_server = WebServer(self.config.web, self.agent, self.memory)
+                bg_tasks.append(asyncio.create_task(web_server.start()))
+
+            # Start Telegram bot
+            bot = TelegramBot(
+                self.config.telegram, self.agent, self.memory, self.schedule_store
+            )
+            scheduler = Scheduler(self.store, self.agent, bot.send_message)
+            bg_tasks.append(asyncio.create_task(scheduler.run()))
+
+            logger.info("Starting serve mode...")
             await bot.start()
+
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
         finally:
-            if scheduler_task and not scheduler_task.done():
-                scheduler_task.cancel()
-                try:
-                    await scheduler_task
-                except asyncio.CancelledError:
-                    pass
-            await bot.stop()
+            for t in bg_tasks:
+                if not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except asyncio.CancelledError:
+                        pass
+            if bot:
+                await bot.stop()
+            if web_server:
+                await web_server.stop()
+            # Kill any leftover child processes (agent subprocesses, background tasks)
+            kill_descendants()
+
+    async def run_web(self):
+        """Start only the web server (no Telegram)."""
+        from tinabot.web import WebServer
+        web_server = WebServer(self.config.web, self.agent, self.memory)
+        logger.info("Starting web-only mode...")
+        try:
+            await web_server.start()
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        finally:
+            await web_server.stop()
+            kill_descendants()
 
     @property
     def store(self) -> ScheduleStore:
