@@ -355,9 +355,12 @@ class WebServer:
         if not text:
             return
 
+        logger.info(f"WS {ws_id} message: {text[:80]!r}")
+
         # Cancel previous processing for this ws
         proc = self._processing.pop(ws_id, None)
         if proc and not proc.done():
+            logger.info(f"WS {ws_id} cancelling previous processing")
             proc.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(proc), timeout=2.0)
@@ -366,6 +369,7 @@ class WebServer:
 
         task_id = self._get_or_create_task(session_id, text)
         task = self.memory.get_task(task_id)
+        logger.info(f"WS {ws_id} task={task_id} session={task.session_id if task else None} turns={task.turn_count if task else 0}")
 
         # Resolve file attachments
         images: list[ImageInput] = []
@@ -389,6 +393,9 @@ class WebServer:
                 f"[Attached file: {p}]" for p in file_refs
             )
             text = f"{prefix}\n\n{text}"
+
+        # Acknowledge receipt so client knows the message arrived
+        await self._ws_send(ws, {"type": "ack"})
 
         # Create agent processing task
         agent_task = asyncio.create_task(
@@ -426,6 +433,9 @@ class WebServer:
         images: list[ImageInput] | None,
     ):
         """Run agent.process() and stream events to WebSocket."""
+        import time as _time
+        t0 = _time.monotonic()
+
         async def on_text(chunk: str):
             await self._ws_send(ws, {"type": "text", "content": chunk})
 
@@ -434,11 +444,13 @@ class WebServer:
 
         async def on_tool(name: str, input_data: dict):
             detail = _tool_detail(name, input_data)
+            logger.info(f"WS {ws_id} tool: {name} {detail[:80]}")
             await self._ws_send(ws, {"type": "tool", "name": name, "detail": detail})
 
         # Start server-side keepalive to prevent Cloudflare idle timeout
         keepalive = asyncio.create_task(self._keepalive_loop(ws))
 
+        logger.info(f"WS {ws_id} starting agent.process task={task.id}")
         try:
             response = await self.agent.process(
                 message=text,
@@ -448,6 +460,15 @@ class WebServer:
                 on_tool=on_tool,
                 images=images if images else None,
                 web_mode=True,
+            )
+
+            elapsed = _time.monotonic() - t0
+            logger.info(
+                f"WS {ws_id} done in {elapsed:.1f}s — "
+                f"in:{response.input_tokens} out:{response.output_tokens} "
+                f"cost:${response.cost_usd:.4f}" if response.cost_usd else
+                f"WS {ws_id} done in {elapsed:.1f}s — "
+                f"in:{response.input_tokens} out:{response.output_tokens}"
             )
 
             done_msg: dict = {"type": "done", "text": response.text or ""}
@@ -462,10 +483,13 @@ class WebServer:
             await self._ws_send(ws, done_msg)
 
         except asyncio.CancelledError:
+            elapsed = _time.monotonic() - t0
+            logger.warning(f"WS {ws_id} cancelled after {elapsed:.1f}s")
             await self._ws_send(ws, {"type": "error", "message": "Interrupted"})
             raise
         except Exception as e:
-            logger.error(f"Agent error for ws {ws_id}: {e}")
+            elapsed = _time.monotonic() - t0
+            logger.error(f"WS {ws_id} agent error after {elapsed:.1f}s: {e}")
             await self._ws_send(ws, {"type": "error", "message": str(e)})
         finally:
             keepalive.cancel()

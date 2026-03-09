@@ -651,12 +651,14 @@ class TinaAgent:
         web_mode: bool,
     ) -> AgentResponse:
         """Process a message via Claude SDK."""
+        import time as _time
+        t0 = _time.monotonic()
         options = self._build_options(task, chat_id=chat_id, no_thinking=no_thinking, web_mode=web_mode)
         logger.info(
-            f"process task={task.id} session={task.session_id} "
+            f"[claude] task={task.id} session={task.session_id} "
             f"resume={'yes' if options.resume else 'no'} "
             f"summary={'yes' if task.summary else 'no'} "
-            f"turns={task.turn_count}"
+            f"turns={task.turn_count} msg={message[:60]!r}"
         )
         response = AgentResponse()
         text_parts: list[str] = []
@@ -680,9 +682,14 @@ class TinaAgent:
         )
 
         timeout = self.config.timeout_seconds or None
+        first_event = True
         try:
             async with asyncio.timeout(timeout):
                 async for msg in query(prompt=prompt, options=options):
+                    if first_event:
+                        logger.info(f"[claude] task={task.id} first event received after {_time.monotonic() - t0:.1f}s")
+                        first_event = False
+
                     if isinstance(msg, SystemMessage):
                         if msg.subtype == "init":
                             session_id = msg.data.get("session_id")
@@ -691,9 +698,9 @@ class TinaAgent:
                                 self.memory.update_session_id(
                                     task.id, session_id
                                 )
-                                logger.debug(
-                                    f"Session init: task={task.id} "
-                                    f"session={session_id}"
+                                logger.info(
+                                    f"[claude] task={task.id} "
+                                    f"session_init={session_id}"
                                 )
 
                     elif isinstance(msg, AssistantMessage):
@@ -714,6 +721,7 @@ class TinaAgent:
 
                             elif isinstance(block, ToolUseBlock):
                                 response.tool_uses.append(block.name)
+                                logger.info(f"[claude] task={task.id} tool={block.name}")
                                 if on_tool:
                                     await on_tool(block.name, block.input)
 
@@ -722,7 +730,6 @@ class TinaAgent:
                         response.cost_usd = msg.total_cost_usd
                         response.num_turns = msg.num_turns
                         if msg.usage:
-                            logger.debug(f"Usage: {msg.usage}")
                             response.input_tokens = msg.usage.get(
                                 "input_tokens", 0
                             )
@@ -742,15 +749,25 @@ class TinaAgent:
                         self.memory.update_session_id(
                             task.id, msg.session_id
                         )
+                        elapsed = _time.monotonic() - t0
+                        logger.info(
+                            f"[claude] task={task.id} done in {elapsed:.1f}s "
+                            f"turns={msg.num_turns} in:{response.input_tokens} out:{response.output_tokens} "
+                            f"cost=${response.cost_usd:.4f}" if response.cost_usd else
+                            f"[claude] task={task.id} done in {elapsed:.1f}s "
+                            f"turns={msg.num_turns} in:{response.input_tokens} out:{response.output_tokens}"
+                        )
 
         except TimeoutError:
-            logger.warning(f"Agent timed out after {timeout}s for task {task.id}")
+            elapsed = _time.monotonic() - t0
+            logger.warning(f"[claude] task={task.id} timed out after {elapsed:.1f}s")
             text_parts.append(
                 f"Request timed out after {timeout}s. "
                 "You can retry or send a simpler request."
             )
         except Exception as e:
-            logger.error(f"Agent error: {e}")
+            elapsed = _time.monotonic() - t0
+            logger.error(f"[claude] task={task.id} error after {elapsed:.1f}s: {e}")
             text_parts.append(f"Error: {e}")
 
         response.text = "\n".join(text_parts) if text_parts else ""
@@ -798,14 +815,16 @@ class TinaAgent:
         web_mode: bool = False,
     ) -> AgentResponse:
         """Process a message via OpenAI-compatible provider."""
+        import time as _time
+        t0 = _time.monotonic()
         system_prompt = self._build_system_prompt(task, chat_id=chat_id, web_mode=web_mode)
         self._history.log(task.id, "system_prompt", text=system_prompt)
 
         mode = "codex" if self._use_codex else "api"
         logger.info(
-            f"process_openai task={task.id} mode={mode} "
+            f"[openai] task={task.id} mode={mode} "
             f"provider={self.config.provider} model={self.config.model} "
-            f"turns={task.turn_count}"
+            f"turns={task.turn_count} msg={message[:60]!r}"
         )
 
         response = AgentResponse()
@@ -856,14 +875,22 @@ class TinaAgent:
             else:
                 response.cost_usd = self._estimate_cost_openai(response)
 
+            elapsed = _time.monotonic() - t0
+            logger.info(
+                f"[openai] task={task.id} done in {elapsed:.1f}s "
+                f"in:{response.input_tokens} out:{response.output_tokens}"
+            )
+
         except TimeoutError:
-            logger.warning(f"Agent timed out after {timeout}s for task {task.id}")
+            elapsed = _time.monotonic() - t0
+            logger.warning(f"[openai] task={task.id} timed out after {elapsed:.1f}s")
             response.text = (
                 f"Request timed out after {timeout}s. "
                 "You can retry or send a simpler request."
             )
         except Exception as e:
-            logger.error(f"OpenAI agent error: {e}")
+            elapsed = _time.monotonic() - t0
+            logger.error(f"[openai] task={task.id} error after {elapsed:.1f}s: {e}")
             response.text = f"Error: {e}"
 
         # Log response
