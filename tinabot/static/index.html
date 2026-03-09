@@ -630,12 +630,13 @@ function handleMessage(msg) {
       if (currentTaskId) {
         ws.send(JSON.stringify({ type: 'command', cmd: 'history', args: '{}' }));
       }
-      // If agent is still processing (reconnected to running task), show spinner
+      // Reset processing state, then restore if agent is still running
+      isProcessing = false;
       if (msg.processing) {
         isProcessing = true;
-        updateSendBtn();
         startBotMessage();
       }
+      updateSendBtn();
       msgInput.focus();
       break;
 
